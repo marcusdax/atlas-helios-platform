@@ -1,0 +1,326 @@
+.App {
+  text-align: center;
+}
+
+/* Layout Components */
+.main-layout {
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.sidebar {
+  width: 280px;
+  background: var(--neutral-900);
+  border-right: 1px solid var(--neutral-800);
+  overflow-y: auto;
+  transition: transform 0.3s ease;
+}
+
+.sidebar.collapsed {
+  transform: translateX(-280px);
+}
+
+.content-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.content-main {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-lg);
+}
+
+/* Navigation */
+.nav-sidebar {
+  position: fixed;
+  left: 0;
+  top: 0;
+  height: 100vh;
+  width: 80px;
+  background: var(--neutral-900);
+  border-right: 1px solid var(--neutral-800);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: var(--space-md) 0;
+  z-index: 100;
+}
+
+.nav-logo {
+  width: 48px;
+  height: 48px;
+  margin-bottom: var(--space-lg);
+  border-radius: var(--radius-md);
+  background: var(--primary-500);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-weight: bold;
+  font-size: 18px;
+}
+
+.nav-items {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.nav-item {
+  width: 48px;
+  height: 48px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--neutral-400);
+  text-decoration: none;
+  transition: all 0.3s ease;
+  position: relative;
+}
+
+.nav-item:hover {
+  background: var(--neutral-800);
+  color: var(--neutral-100);
+}
+
+.nav-item.active {
+  background: var(--primary-500);
+  color: white;
+  box-shadow: var(--glow-cta);
+}
+
+.nav-item.active::after {
+  content: '';
+  position: absolute;
+  right: -4px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 2px;
+  height: 24px;
+  background: var(--primary-500);
+  border-radius: 1px;
+}
+
+/* Storm Alert Banner */
+.storm-alert-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 64px;
+  background: var(--error-500);
+  display: flex;
+  align-items: center;
+  padding: 0 var(--space-lg);
+  z-index: 1000;
+  transform: translateY(-100%);
+  transition: transform 0.4s ease-out;
+}
+
+.storm-alert-banner.visible {
+  transform: translateY(0);
+}
+
+.storm-alert-content {
+  display: flex;
+  align-items: center;
+  color: white;
+  font-size: var(--font-size-base);
+  font-weight: 500;
+  width: 100%;
+}
+
+.storm-alert-icon {
+  width: 24px;
+  height: 24px;
+  margin-right: var(--space-sm);
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.storm-alert-text {
+  flex: 1;
+}
+
+.storm-alert-close {
+  background: none;
+  border: none;
+  color: white;
+  cursor: pointer;
+  padding: var(--space-xs);
+  border-radius: var(--radius-sm);
+  transition: background 0.3s ease;
+}
+
+.storm-alert-close:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+/* Dashboard Grid */
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+  gap: var(--space-lg);
+  margin-bottom: var(--space-xl);
+}
+
+.dashboard-card {
+  background: var(--glass-surface);
+  backdrop-filter: blur(24px);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-lg);
+  transition: border-color 0.3s ease;
+}
+
+.dashboard-card:hover {
+  border-color: rgba(163, 163, 163, 0.4);
+}
+
+.dashboard-card-header {
+  display: flex;
+  align-items: center;
+  margin-bottom: var(--space-md);
+}
+
+.dashboard-card-icon {
+  width: 24px;
+  height: 24px;
+  margin-right: var(--space-sm);
+  color: var(--primary-500);
+}
+
+.dashboard-card-title {
+  font-size: var(--font-size-xl);
+  font-weight: 600;
+  color: var(--neutral-100);
+}
+
+.dashboard-card-content {
+  font-size: var(--font-size-sm);
+  color: var(--neutral-400);
+}
+
+/* Property Cards */
+.property-card {
+  background: var(--neutral-900);
+  border: 1px solid var(--neutral-800);
+  border-radius: var(--radius-sm);
+  padding: var(--space-md);
+  margin-bottom: var(--space-sm);
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.property-card:hover {
+  background: var(--neutral-800);
+  border-color: var(--primary-500);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 122, 255, 0.1);
+}
+
+.property-card.high-risk {
+  border-left: 4px solid var(--error-500);
+}
+
+.property-card.medium-risk {
+  border-left: 4px solid var(--warning-500);
+}
+
+.property-card.low-risk {
+  border-left: 4px solid var(--success-500);
+}
+
+/* Risk Score Badge */
+.risk-score {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--space-xs) var(--space-sm);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.risk-score.high {
+  background: rgba(220, 53, 69, 0.2);
+  color: var(--error-500);
+}
+
+.risk-score.medium {
+  background: rgba(255, 193, 7, 0.2);
+  color: var(--warning-500);
+}
+
+.risk-score.low {
+  background: rgba(40, 167, 69, 0.2);
+  color: var(--success-500);
+}
+
+/* Map Container */
+.storm-map-container {
+  height: 600px;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  border: 1px solid var(--neutral-800);
+}
+
+.map-popup {
+  background: var(--neutral-900);
+  border: 1px solid var(--neutral-800);
+  border-radius: var(--radius-sm);
+  padding: var(--space-sm);
+  color: var(--neutral-100);
+}
+
+/* Chart Container */
+.chart-container {
+  height: 400px;
+  background: var(--neutral-900);
+  border-radius: var(--radius-md);
+  padding: var(--space-md);
+}
+
+/* Mobile Responsive */
+@media (max-width: 768px) {
+  .sidebar {
+    position: fixed;
+    top: 64px;
+    left: 0;
+    height: calc(100vh - 64px);
+    transform: translateX(-100%);
+    z-index: 999;
+  }
+  
+  .sidebar.open {
+    transform: translateX(0);
+  }
+  
+  .content-area {
+    margin-left: 0;
+  }
+  
+  .dashboard-grid {
+    grid-template-columns: 1fr;
+    gap: var(--space-md);
+  }
+  
+  .dashboard-card {
+    padding: var(--space-md);
+  }
+  
+  .storm-map-container {
+    height: 400px;
+  }
+}

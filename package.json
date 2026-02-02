@@ -1,0 +1,38 @@
+{
+  "name": "atlas-helios-platform",
+  "version": "1.0.0",
+  "description": "PropertyInsight AI - Atlas & Helios: Storm Intelligence & Estimating Platform",
+  "main": "index.js",
+  "scripts": {
+    "dev": "concurrently \"npm run backend:dev\" \"npm run frontend:dev\"",
+    "frontend:dev": "cd frontend && npm start",
+    "backend:dev": "cd backend && npm run dev",
+    "build": "npm run frontend:build && npm run backend:build",
+    "frontend:build": "cd frontend && npm run build",
+    "backend:build": "cd backend && npm run build",
+    "start": "cd backend && npm start",
+    "install:all": "npm install && cd frontend && npm install && cd ../backend && npm install",
+    "docker:up": "docker-compose up -d",
+    "docker:down": "docker-compose down",
+    "deploy:staging": "npm run build && docker-compose -f docker-compose.staging.yml up -d",
+    "deploy:production": "npm run build && docker-compose -f docker-compose.prod.yml up -d"
+  },
+  "keywords": [
+    "property-insight",
+    "storm-intelligence",
+    "damage-assessment",
+    "ai-estimating",
+    "real-estate",
+    "insurance"
+  ],
+  "author": "MiniMax Agent",
+  "license": "MIT",
+  "devDependencies": {
+    "concurrently": "^7.6.0"
+  },
+  "workspaces": [
+    "frontend",
+    "backend",
+    "mobile"
+  ]
+}
