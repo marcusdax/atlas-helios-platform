@@ -20,7 +20,8 @@ const config = {
     },
     seeds: {
       directory: './seeds'
-    }
+    },
+    wrapIdentifier: (value, origImpl) => origImpl(value)
   },
   
   production: {
@@ -52,14 +53,5 @@ const dbConfig = config[environment];
 
 // Initialize Knex
 const database = knex(dbConfig);
-
-// Test connection
-database.raw('SELECT 1')
-  .then(() => {
-    console.log('✅ Database connection successful');
-  })
-  .catch((error) => {
-    console.error('❌ Database connection failed:', error);
-  });
 
 module.exports = database;

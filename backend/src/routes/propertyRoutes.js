@@ -1,9 +1,14 @@
 const express = require('express');
 const router = express.Router();
 const PropertyService = require('../services/PropertyService');
-const ComputerVisionService = require('../services/ComputerVisionService');
-const authMiddleware = require('../middleware/auth');
-const logger = require('../utils/logger');
+let ComputerVisionService;
+try {
+  ComputerVisionService = require('../services/ComputerVisionService');
+} catch (e) {
+  ComputerVisionService = null;
+}
+const { authMiddleware } = require('../middleware/auth');
+const { logger } = require('../utils/logger');
 
 // Get all properties for user
 router.get('/', authMiddleware, async (req, res) => {

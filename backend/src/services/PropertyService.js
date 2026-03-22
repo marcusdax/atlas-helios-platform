@@ -1,6 +1,6 @@
 const axios = require('axios');
 const db = require('../../config/database');
-const logger = require('../utils/logger');
+const { logger } = require('../utils/logger');
 const { v4: uuidv4 } = require('uuid');
 
 /**
@@ -836,6 +836,63 @@ class PropertyService {
         logger.error(`${provider} connection test failed:`, error);
       }
     }
+  }
+
+  // Lead management stubs
+  async getUserLeads(userId, options = {}) {
+    return [];
+  }
+
+  async getLeadById(leadId, userId) {
+    return null;
+  }
+
+  async createLead(leadData) {
+    return { id: 'lead-' + Date.now(), ...leadData };
+  }
+
+  async updateLead(leadId, userId, updateData) {
+    return { id: leadId, ...updateData };
+  }
+
+  async deleteLead(leadId, userId) {
+    return true;
+  }
+
+  async updateLeadStatus(leadId, userId, status, notes) {
+    return { id: leadId, status, notes };
+  }
+
+  async addLeadNote(leadId, userId, noteData) {
+    return { id: 'note-' + Date.now(), leadId, ...noteData };
+  }
+
+  async getLeadActivities(leadId, userId) {
+    return [];
+  }
+
+  async scheduleFollowUp(leadId, userId, followUpData) {
+    return { id: 'followup-' + Date.now(), leadId, ...followUpData };
+  }
+
+  async calculateLeadScore(leadId, userId) {
+    return 50;
+  }
+
+  async getLeadStatistics(userId, period = 'month') {
+    return { total: 0, converted: 0, pending: 0 };
+  }
+
+  async convertLeadToOpportunity(leadId, userId, data) {
+    return { id: 'opp-' + Date.now(), leadId, ...data };
+  }
+
+  async getLeadPipeline(userId, dateRange = {}) {
+    return [];
+  }
+
+  async bulkUpdateLeads(leadIds, userId, updateData) {
+    return { updated: leadIds.length };
   }
 }
 

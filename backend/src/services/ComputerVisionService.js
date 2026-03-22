@@ -1,10 +1,15 @@
-const tf = require('@tensorflow/tfjs-node');
+let tf;
+try {
+  tf = require('@tensorflow/tfjs-node');
+} catch (e) {
+  tf = null;
+}
 const sharp = require('sharp');
 const fs = require('fs').promises;
 const path = require('path');
 const axios = require('axios');
 const { v4: uuidv4 } = require('uuid');
-const logger = require('../utils/logger');
+const { logger } = require('../utils/logger');
 
 /**
  * Computer Vision Service for Property Analysis

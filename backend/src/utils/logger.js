@@ -197,3 +197,5 @@ module.exports = {
   logPropertyAssessment,
   logComputerVision,
 };
+
+module.exports.logger = logger;

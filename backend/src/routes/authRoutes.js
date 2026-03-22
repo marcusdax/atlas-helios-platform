@@ -3,7 +3,7 @@ const bcrypt = require('bcryptjs');
 const { generateToken, generateRefreshToken, verifyRefreshToken } = require('../middleware/auth');
 const { asyncHandler } = require('../middleware/errorHandler');
 const db = require('../../config/database');
-const logger = require('../utils/logger');
+const { logger } = require('../utils/logger');
 
 const router = express.Router();
 

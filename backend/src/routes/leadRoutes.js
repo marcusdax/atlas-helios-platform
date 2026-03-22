@@ -1,8 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const PropertyService = require('../services/PropertyService');
-const authMiddleware = require('../middleware/auth');
-const logger = require('../utils/logger');
+const { authMiddleware } = require('../middleware/auth');
+const { logger } = require('../utils/logger');
 
 // Get all leads for user
 router.get('/', authMiddleware, async (req, res) => {

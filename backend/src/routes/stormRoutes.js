@@ -1,8 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const StormService = require('../services/StormService');
-const authMiddleware = require('../middleware/auth');
-const logger = require('../utils/logger');
+const { authMiddleware } = require('../middleware/auth');
+const { logger } = require('../utils/logger');
 
 // Get all active storms
 router.get('/', authMiddleware, async (req, res) => {

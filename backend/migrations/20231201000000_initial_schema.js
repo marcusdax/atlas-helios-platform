@@ -4,6 +4,23 @@
  */
 exports.up = function(knex) {
   return knex.schema
+    // Companies table (first, as users reference it)
+    .createTable('companies', function(table) {
+      table.uuid('id').primary().defaultTo(knex.raw('uuid_generate_v4()'));
+      table.string('name').notNullable();
+      table.string('address');
+      table.string('city');
+      table.string('state');
+      table.string('zip_code');
+      table.string('phone');
+      table.string('email');
+      table.string('website');
+      table.json('settings');
+      table.timestamps(true, true);
+      
+      table.index('name');
+    })
+    
     // Users table
     .createTable('users', function(table) {
       table.uuid('id').primary().defaultTo(knex.raw('uuid_generate_v4()'));
@@ -20,23 +37,6 @@ exports.up = function(knex) {
       table.index('email');
       table.index('company_id');
       table.index('status');
-    })
-    
-    // Companies table
-    .createTable('companies', function(table) {
-      table.uuid('id').primary().defaultTo(knex.raw('uuid_generate_v4()'));
-      table.string('name').notNullable();
-      table.string('address');
-      table.string('city');
-      table.string('state');
-      table.string('zip_code');
-      table.string('phone');
-      table.string('email');
-      table.string('website');
-      table.json('settings');
-      table.timestamps(true, true);
-      
-      table.index('name');
     })
     
     // Properties table
