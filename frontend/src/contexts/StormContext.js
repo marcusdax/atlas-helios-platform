@@ -1,5 +1,6 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { useWebSocket } from './WebSocketContext';
+import { atlasAPI } from '../services/api';
 
 const StormContext = createContext();
 
@@ -18,18 +19,17 @@ export const StormProvider = ({ children }) => {
   const [recentAssessments, setRecentAssessments] = useState([]);
   const [weatherConditions, setWeatherConditions] = useState(null);
   const [stormHistory, setStormHistory] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
 
+  // WebSocket event handlers
   useEffect(() => {
     if (socket && isConnected) {
-      // Subscribe to storm updates
       socket.emit('subscribe_storms');
       
-      // Storm event handlers
       socket.on('storm_alert', (alert) => {
         console.log('Storm alert received:', alert);
         setStormAlerts(prev => [alert, ...prev.slice(0, 9)]);
-        
-        // Add to active storms if not already present
         setActiveStorms(prev => {
           const exists = prev.find(storm => storm.id === alert.id);
           if (!exists) {
@@ -53,17 +53,14 @@ export const StormProvider = ({ children }) => {
         setActiveStorms(prev => prev.filter(storm => storm.id !== data.id));
       });
 
-      // Weather condition updates
       socket.on('weather_update', (data) => {
         setWeatherConditions(data);
       });
 
-      // Property assessment events
       socket.on('property_assessment_complete', (data) => {
         setRecentAssessments(prev => [data, ...prev.slice(0, 19)]);
       });
 
-      // Cleanup listeners
       return () => {
         socket.off('storm_alert');
         socket.off('storm_update');
@@ -79,66 +76,226 @@ export const StormProvider = ({ children }) => {
     initializeStormData();
   }, []);
 
+  // ==================== API FUNCTIONS ====================
+
   const initializeStormData = async () => {
+    setLoading(true);
+    setError(null);
     try {
-      // Mock data for demo - in real implementation, fetch from API
-      const mockActiveStorms = [
-        {
-          id: 'storm_001',
-          type: 'severe_thunderstorm',
-          severity: 'severe',
-          region: 'Dallas County, TX',
-          center: { lat: 32.7767, lng: -96.7970 },
-          detectedAt: new Date(Date.now() - 30 * 60 * 1000),
-          affectedProperties: 47,
-          alertLevel: 'warning'
-        },
-        {
-          id: 'storm_002',
-          type: 'hail',
-          severity: 'moderate',
-          region: 'Tarrant County, TX',
-          center: { lat: 32.7555, lng: -97.3308 },
-          detectedAt: new Date(Date.now() - 60 * 60 * 1000),
-          affectedProperties: 23,
-          alertLevel: 'watch'
-        }
-      ];
+      // Load storms and alerts in parallel
+      const [stormsRes, alertsRes] = await Promise.allSettled([
+        atlasAPI.storms.getAll({ limit: 50 }),
+        atlasAPI.storms.getUserAlerts(),
+      ]);
 
-      setActiveStorms(mockActiveStorms);
+      if (stormsRes.status === 'fulfilled') {
+        setActiveStorms(stormsRes.value.data.data || []);
+      }
+      if (alertsRes.status === 'fulfilled') {
+        setStormAlerts(alertsRes.value.data.data || []);
+      }
 
-      const mockAssessments = [
-        {
-          id: 'assessment_001',
-          propertyAddress: '1247 Oak Ridge Dr, Dallas, TX',
-          overallScore: 94,
-          completedAt: new Date(Date.now() - 15 * 60 * 1000),
-          riskLevel: 'high'
-        },
-        {
-          id: 'assessment_002',
-          propertyAddress: '3856 Maple Ave, Dallas, TX',
-          overallScore: 87,
-          completedAt: new Date(Date.now() - 32 * 60 * 1000),
-          riskLevel: 'high'
-        }
-      ];
-
-      setRecentAssessments(mockAssessments);
-
-    } catch (error) {
-      console.error('Failed to initialize storm data:', error);
+      // Check weather service status
+      try {
+        const weatherRes = await atlasAPI.weather.getStatus();
+        setWeatherConditions(weatherRes.data);
+      } catch (e) {
+        console.warn('Weather service not available:', e.message);
+      }
+    } catch (err) {
+      console.error('Failed to initialize storm data:', err);
+      setError(err.message);
+    } finally {
+      setLoading(false);
     }
   };
 
-  // Helper functions
+  // Storms API
+  const fetchStorms = useCallback(async (params = {}) => {
+    setLoading(true);
+    try {
+      const res = await atlasAPI.storms.getAll(params);
+      setActiveStorms(res.data.data || []);
+      return res.data;
+    } catch (err) {
+      setError(err.message);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const fetchStormById = useCallback(async (id) => {
+    try {
+      const res = await atlasAPI.storms.getById(id);
+      return res.data.data;
+    } catch (err) {
+      setError(err.message);
+      throw err;
+    }
+  }, []);
+
+  const fetchStormTrack = useCallback(async (id) => {
+    try {
+      const res = await atlasAPI.storms.getTrack(id);
+      return res.data.data;
+    } catch (err) {
+      setError(err.message);
+      throw err;
+    }
+  }, []);
+
+  const fetchPropertiesAtRisk = useCallback(async (id, radius = 50) => {
+    try {
+      const res = await atlasAPI.storms.getPropertiesAtRisk(id, { radius });
+      return res.data.data;
+    } catch (err) {
+      setError(err.message);
+      throw err;
+    }
+  }, []);
+
+  const fetchStormPredictions = useCallback(async (id, timeHorizon = 72) => {
+    try {
+      const res = await atlasAPI.storms.getPredictions(id, { timeHorizon });
+      return res.data.data;
+    } catch (err) {
+      setError(err.message);
+      throw err;
+    }
+  }, []);
+
+  const fetchHistoricalStorms = useCallback(async (region, params = {}) => {
+    try {
+      const res = await atlasAPI.storms.getHistory(region, params);
+      setStormHistory(res.data.data || []);
+      return res.data;
+    } catch (err) {
+      setError(err.message);
+      throw err;
+    }
+  }, []);
+
+  const subscribeToAlerts = useCallback(async (data) => {
+    try {
+      const res = await atlasAPI.storms.subscribe(data);
+      return res.data.data;
+    } catch (err) {
+      setError(err.message);
+      throw err;
+    }
+  }, []);
+
+  const deleteSubscription = useCallback(async (id) => {
+    try {
+      await atlasAPI.storms.deleteSubscription(id);
+      return true;
+    } catch (err) {
+      setError(err.message);
+      throw err;
+    }
+  }, []);
+
+  const generateImpactReport = useCallback(async (id, format = 'json') => {
+    try {
+      const res = await atlasAPI.storms.getImpactReport(id, { format });
+      return res.data;
+    } catch (err) {
+      setError(err.message);
+      throw err;
+    }
+  }, []);
+
+  // Weather API
+  const fetchWeatherForecast = useCallback(async (lat, lng) => {
+    try {
+      const res = await atlasAPI.weather.getForecast(lat, lng);
+      return res.data.data;
+    } catch (err) {
+      setError(err.message);
+      throw err;
+    }
+  }, []);
+
+  const fetchHourlyForecast = useCallback(async (lat, lng) => {
+    try {
+      const res = await atlasAPI.weather.getHourlyForecast(lat, lng);
+      return res.data.data;
+    } catch (err) {
+      setError(err.message);
+      throw err;
+    }
+  }, []);
+
+  const fetchWeatherAlerts = useCallback(async () => {
+    try {
+      const res = await atlasAPI.weather.getAlerts();
+      return res.data.data;
+    } catch (err) {
+      setError(err.message);
+      throw err;
+    }
+  }, []);
+
+  const fetchAlertsByArea = useCallback(async (lat, lng, radius = 25) => {
+    try {
+      const res = await atlasAPI.weather.getAlertsByArea(lat, lng, radius);
+      return res.data.data;
+    } catch (err) {
+      setError(err.message);
+      throw err;
+    }
+  }, []);
+
+  const checkSevereWeather = useCallback(async (lat, lng) => {
+    try {
+      const res = await atlasAPI.weather.checkSevere(lat, lng);
+      return res.data.data;
+    } catch (err) {
+      setError(err.message);
+      throw err;
+    }
+  }, []);
+
+  const fetchRadarStations = useCallback(async () => {
+    try {
+      const res = await atlasAPI.weather.getRadarStations();
+      return res.data.data;
+    } catch (err) {
+      setError(err.message);
+      throw err;
+    }
+  }, []);
+
+  const fetchStormReports = useCallback(async (params = {}) => {
+    try {
+      const res = await atlasAPI.weather.getStormReports(params);
+      return res.data.data;
+    } catch (err) {
+      setError(err.message);
+      throw err;
+    }
+  }, []);
+
+  const batchCheckSevere = useCallback(async (locations) => {
+    try {
+      const res = await atlasAPI.weather.batchSevere({ locations });
+      return res.data;
+    } catch (err) {
+      setError(err.message);
+      throw err;
+    }
+  }, []);
+
+  // ==================== HELPER FUNCTIONS ====================
+
   const getStormById = (id) => {
     return activeStorms.find(storm => storm.id === id);
   };
 
   const getStormsByRegion = (region) => {
     return activeStorms.filter(storm => 
-      storm.region.toLowerCase().includes(region.toLowerCase())
+      storm.region?.toLowerCase().includes(region.toLowerCase())
     );
   };
 
@@ -180,11 +337,10 @@ export const StormProvider = ({ children }) => {
   };
 
   const getWeatherForecast = (hours = 24) => {
-    // Mock weather forecast data
     const forecast = [];
     const now = new Date();
     
-    for (let i = 0; i < hours; i += 3) { // Every 3 hours
+    for (let i = 0; i < hours; i += 3) {
       const time = new Date(now.getTime() + i * 60 * 60 * 1000);
       forecast.push({
         time: time.toISOString(),
@@ -206,6 +362,8 @@ export const StormProvider = ({ children }) => {
     recentAssessments,
     weatherConditions,
     stormHistory,
+    loading,
+    error,
     
     // Computed data
     getStormById,
@@ -215,16 +373,39 @@ export const StormProvider = ({ children }) => {
     getHighRiskProperties,
     getStormStats,
     
-    // Actions
+    // API Actions - Storms
+    fetchStorms,
+    fetchStormById,
+    fetchStormTrack,
+    fetchPropertiesAtRisk,
+    fetchStormPredictions,
+    fetchHistoricalStorms,
+    subscribeToAlerts,
+    deleteSubscription,
+    generateImpactReport,
+    
+    // API Actions - Weather
+    fetchWeatherForecast,
+    fetchHourlyForecast,
+    fetchWeatherAlerts,
+    fetchAlertsByArea,
+    checkSevereWeather,
+    fetchRadarStations,
+    fetchStormReports,
+    batchCheckSevere,
+    
+    // Other Actions
     acknowledgeAlert,
     clearAlert,
     getWeatherForecast,
+    initializeStormData,
     
-    // Direct setters (for manual updates)
+    // Direct setters
     setActiveStorms,
     setStormAlerts,
     setRecentAssessments,
-    setWeatherConditions
+    setWeatherConditions,
+    setStormHistory,
   };
 
   return (
