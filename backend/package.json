@@ -24,16 +24,16 @@
     "pg": "^8.8.0",
     "knex": "^2.4.0",
     "multer": "^2.0.2",
-    "sharp": "^0.34.5",
+    "sharp": "^0.35.4",
     "axios": "^1.13.4",
     "node-cron": "^3.0.2",
-    "joi": "^17.6.0",
+    "joi": "^18.2.8",
     "winston": "^3.8.2",
     "rate-limiter-flexible": "^2.4.1",
     "compression": "^1.7.4",
     "express-rate-limit": "^6.6.0",
     "validator": "^13.7.0",
-    "uuid": "^9.0.0"
+    "uuid": "^14.0.2"
   },
   "devDependencies": {
     "nodemon": "^2.0.20",
