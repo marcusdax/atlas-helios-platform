@@ -16,7 +16,10 @@
     "docker:down": "docker-compose down",
     "deploy:staging": "npm run build && docker-compose -f docker-compose.staging.yml up -d",
     "deploy:production": "npm run build && docker-compose -f docker-compose.prod.yml up -d",
-    "test:packages": "npm test --workspace=@alter/render-core && npm test --workspace=@alter/render-server"
+    "test:packages": "npm test --workspace=@alter/render-core && npm test --workspace=@alter/render-server && npm test --workspace=@atlas/radar-map",
+    "test:backend": "cd backend && npm test",
+    "test:e2e": "node tests/e2e/platform.e2e.mjs",
+    "test:all": "npm run test:packages && npm run test:backend"
   },
   "keywords": [
     "property-insight",

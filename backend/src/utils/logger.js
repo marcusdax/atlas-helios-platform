@@ -188,12 +188,22 @@ const logComputerVision = (operation, result, data) => {
   });
 };
 
-module.exports = {
-  logger,
-  logWithContext,
-  logRequest,
-  logError,
-  logStormEvent,
-  logPropertyAssessment,
-  logComputerVision,
-};
+/**
+ * The winston logger IS the export, with the helpers hung off it.
+ *
+ * Every consumer in this repo writes `const logger = require('../utils/logger')`
+ * and then calls `logger.info(...)`. Exporting a plain object broke all of them
+ * at the first log line - which is why the server could not boot. Exporting the
+ * logger itself and attaching the helpers keeps both call styles working:
+ *
+ *   const logger = require('../utils/logger');            // logger.info(...)
+ *   const { logger, logError } = require('../utils/logger');
+ */
+module.exports = logger;
+module.exports.logger = logger;
+module.exports.logWithContext = logWithContext;
+module.exports.logRequest = logRequest;
+module.exports.logError = logError;
+module.exports.logStormEvent = logStormEvent;
+module.exports.logPropertyAssessment = logPropertyAssessment;
+module.exports.logComputerVision = logComputerVision;

@@ -1,4 +1,4 @@
-const logger = require('./logger');
+const logger = require('../utils/logger');
 
 /**
  * Global error handling middleware
@@ -91,9 +91,16 @@ const errorHandler = (err, req, res, next) => {
   }
 
   // Send error response
-  res.status(error.statusCode || 500).json({
+  const status = error.statusCode || 500;
+
+  res.status(status).json({
     success: false,
+    // `error` stays a string so existing clients keep working; `code` and
+    // `details` are what new code should branch on, because a message can be
+    // reworded and a code cannot.
     error: error.message || 'Server Error',
+    code: error.code || (status >= 500 ? 'INTERNAL_ERROR' : undefined),
+    ...(error.details ? { details: error.details } : {}),
     ...(process.env.NODE_ENV === 'development' && { stack: err.stack }),
     timestamp: new Date().toISOString()
   });
@@ -119,10 +126,22 @@ const notFound = (req, res, next) => {
  * Custom error class
  */
 class ErrorResponse extends Error {
-  constructor(message, statusCode) {
+  /**
+   * @param {string} message  human-readable, and safe to show a user
+   * @param {number} statusCode
+   * @param {object} [details] machine-readable extras: `code` for a stable
+   *        identifier clients branch on, plus anything specific to the failure
+   *        (which fields failed validation, which status blocked a transition).
+   *        Callers were already passing this and it was being dropped, so every
+   *        error arrived as an untyped string.
+   */
+  constructor(message, statusCode, details = {}) {
     super(message);
     this.statusCode = statusCode;
     this.isOperational = true;
+    const { code, ...rest } = details || {};
+    this.code = code;
+    this.details = Object.keys(rest).length ? rest : undefined;
 
     Error.captureStackTrace(this, this.constructor);
   }

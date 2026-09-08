@@ -4,7 +4,7 @@ import {
   MapIcon,
   ChartBarIcon,
   ExclamationTriangleIcon
-} from '@heroicons/react/outline';
+} from '@heroicons/react/24/outline';
 
 const QuickStats = ({ data }) => {
   const stats = [

@@ -210,10 +210,20 @@ GET  /api/properties/search   # Search properties
 
 ### Storm Intelligence
 ```
-GET  /api/storms              # Get active storms
-GET  /api/storms/:id          # Get storm details
-POST /api/storms/track        # Start storm tracking
+GET  /api/storms              # Get active storms (optionally within a viewport)
+GET  /api/storms/:id          # Get storm details + your exposure
+GET  /api/storms/regions      # Monitoring regions Atlas polls
+POST /api/storms/track        # Register a monitoring region
 GET  /api/storms/report/:id   # Get storm report
+GET  /api/storms/:id/properties  # Properties in the footprint, scored
+```
+
+### Radar & Mapping
+```
+GET  /api/radar/config        # Providers, basemaps and defaults for the map
+GET  /api/radar/frames        # Two-hour radar loop + nowcast, with tile URLs
+GET  /api/radar/alerts        # Active NWS warning polygons (GeoJSON)
+GET  /api/radar/exposure      # Your properties inside an active warning
 ```
 
 ### Property Assessments
@@ -273,6 +283,31 @@ HTML page with no build step.
 With no `ALTER_RENDER_API_KEY` configured the engine boots on a mock provider that returns
 real (synthetic) images offline, so the feature is demoable and testable before any key is
 provisioned. See [`packages/README.md`](packages/README.md) for the full guide.
+
+## 🗺️ Radar & Mapping
+
+Live weather mapping is packaged as [`@atlas/radar-map`](packages/atlas-radar-map/README.md):
+an animated NOAA radar mosaic, NWS warning polygons, and a property-risk overlay
+on a MapLibre GL map. The React component that drives it is
+`frontend/src/components/maps/RadarMap.js`, and it powers the Storm Intelligence page.
+
+The radar approach is adapted from [OpenRadar](https://github.com/marcusdax/OpenRadar)
+(MIT), keeping its premise: **the data is public**. NOAA publishes every radar
+mosaic and warning polygon free, so nothing here needs an API key.
+
+| Capability | Notes |
+|---|---|
+| Two-hour radar loop | Play, pause, scrub, speed, opacity, jump-to-live |
+| Two-lane cross-fade | Scrubbing reuses two tile sources instead of rebuilding one per frame |
+| NWS warning polygons | Severity-ranked and ordered so a tornado warning is never buried |
+| Property risk overlay | GPU circle layer, data-driven colour by damage probability |
+| Exposure join | Point-in-polygon against your book of business — the dispatch list |
+
+OpenRadar's Rust NEXRAD/GRIB2 decoding is **not** ported: that is a desktop app
+with a native sidecar, and this is a browser in a field truck. The browser
+consumes rendered tiles and the server proxies the JSON documents — same data,
+one decode boundary earlier. See the
+[package README](packages/atlas-radar-map/README.md) for what carried over.
 
 ## 🔒 Security
 
