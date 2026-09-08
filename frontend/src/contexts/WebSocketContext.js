@@ -19,8 +19,20 @@ export const WebSocketProvider = ({ children }) => {
   const [connectionError, setConnectionError] = useState(null);
 
   useEffect(() => {
-    // Initialize socket connection
-    const newSocket = io(process.env.REACT_APP_WS_URL || 'ws://localhost:5000', {
+    /**
+     * Same origin by default, not localhost:5000.
+     *
+     * A built bundle served from anywhere other than localhost:5000 could never
+     * reach that address, so the socket failed to connect and every real-time
+     * feature - storm alerts, assessment completion, lead notifications -
+     * silently did nothing. Defaulting to the page's own origin works behind
+     * the reverse proxy that already fronts /api, and REACT_APP_WS_URL still
+     * overrides it for a split deployment.
+     */
+    const wsUrl = process.env.REACT_APP_WS_URL
+      || (typeof window !== 'undefined' ? window.location.origin : undefined);
+
+    const newSocket = io(wsUrl, {
       transports: ['websocket', 'polling'],
       timeout: 20000,
       reconnectionAttempts: 5,

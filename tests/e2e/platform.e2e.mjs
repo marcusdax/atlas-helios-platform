@@ -94,7 +94,7 @@ const web = http.createServer((req, res) => {
   // Same-origin API proxy. Serving the app and the API from one origin is what
   // the deployment does (nginx in front of both), and it keeps the browser from
   // treating every authenticated call as cross-origin.
-  if (url.startsWith('/api') || url === '/health') {
+  if (url.startsWith('/api') || url.startsWith('/socket.io') || url === '/health') {
     const upstream = http.request(
       { host: '127.0.0.1', port: Number(API_PORT), path: req.url, method: req.method, headers: req.headers },
       (proxied) => {
@@ -114,6 +114,30 @@ const web = http.createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream' });
   res.end(fs.readFileSync(file));
 });
+/**
+ * Proxy the WebSocket upgrade too. Socket.IO now connects to the page's own
+ * origin, so without this the handshake would 404 against the static server -
+ * the same thing nginx has to be configured for in a real deployment.
+ */
+web.on('upgrade', (req, socket, head) => {
+  const upstream = http.request({
+    host: '127.0.0.1', port: Number(API_PORT), path: req.url, method: req.method,
+    headers: req.headers
+  });
+  upstream.on('upgrade', (upstreamRes, upstreamSocket, upstreamHead) => {
+    socket.write(
+      `HTTP/1.1 101 Switching Protocols\r\n` +
+      Object.entries(upstreamRes.headers).map(([k, v]) => `${k}: ${v}`).join('\r\n') +
+      '\r\n\r\n'
+    );
+    if (upstreamHead?.length) socket.write(upstreamHead);
+    upstreamSocket.pipe(socket).pipe(upstreamSocket);
+  });
+  upstream.on('error', () => socket.destroy());
+  if (head?.length) upstream.write(head);
+  upstream.end();
+});
+
 await new Promise((r) => web.listen(Number(WEB_PORT), r));
 
 const waitFor = async (url, timeoutMs = 20000) => {
