@@ -119,7 +119,7 @@ another platform" survive contact with someone else's CSS reset.
 |---|---|
 | Attributes | `before` `after` `position` `label-before` `label-after` `orientation` `fit` `loading` `disabled` |
 | Events | `input` (during drag), `change` (on release / keypress) — both `composed`, both carry `detail.position` |
-| Theming | `--alter-radius` `--alter-aspect` `--alter-surface` `--alter-accent` `--alter-handle-size` `--alter-seam-width` `--alter-label-bg` `--alter-label-fg` |
+| Theming | `--alter-radius` `--alter-aspect` `--alter-surface` `--alter-accent` `--alter-handle-size` `--alter-seam-width` `--alter-label-bg` `--alter-label-fg` `--alter-label-accent-fg` |
 | Parts | `::part(before-layer)` `after-layer` `seam` `handle` `label` `state` |
 
 It is a real `role="slider"`: focusable, arrow keys nudge by 1, Shift+arrow and Page keys

@@ -259,7 +259,13 @@ The before/after property renderer is packaged separately from the platform, und
 | `@alter/render-elements` | `<alter-compare>`, the before/after slider as a custom element — works with or without a framework. |
 | `@alter/render-react` | The `useAlterRender` hook and an `<AlterCompare>` component. |
 
-Inside this repo they are wired up by `backend/src/routes/renderRoutes.js`,
+A standalone app built on them lives in
+[`apps/propertyinsight-studio`](apps/propertyinsight-studio/README.md) — the full
+PropertyInsight product (render studio, suggestions, geospatial screening, campaign
+one-pagers, market framing) with its own server, build and deploy, independent of the
+Atlas & Helios backend.
+
+Inside this repo they are also wired up by `backend/src/routes/renderRoutes.js`,
 `frontend/src/lib/renderer.js`, and `frontend/src/components/render/AlterRenderPanel.js`.
 [`examples/vanilla.html`](examples/vanilla.html) shows the same engine driven from a plain
 HTML page with no build step.
