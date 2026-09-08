@@ -12,6 +12,7 @@
 import { chromium } from 'playwright';
 import http from 'node:http';
 import fs from 'node:fs';
+import zlib from 'node:zlib';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 
@@ -19,8 +20,13 @@ const require = createRequire(import.meta.url);
 const { encodePng } = require('@alter/render-core');
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
-const BEFORE = `data:image/png;base64,${encodePng(200, 150, (x, y) => [40, 60 + (y % 40), 90])}`;
-const AFTER = `data:image/png;base64,${encodePng(200, 150, (x, y) => [220, 120 + (x % 40), 30])}`;
+// Flat, maximally distinct colours: the pixel probe below asserts which of the
+// two is actually painted where, so they must not be confusable with each
+// other, with the surface colour, or with a label background.
+const BEFORE_RGB = [255, 0, 0];
+const AFTER_RGB = [0, 255, 0];
+const BEFORE = `data:image/png;base64,${encodePng(200, 150, () => BEFORE_RGB)}`;
+const AFTER = `data:image/png;base64,${encodePng(200, 150, () => AFTER_RGB)}`;
 
 const PAGE = `<!doctype html><meta charset="utf-8">
 <style>body{margin:0}alter-compare{width:600px}</style>
@@ -48,6 +54,39 @@ const server = http.createServer((req, res) => {
 // Playwright resolves its own browser by default; CHROMIUM_PATH overrides it for
 // environments that ship a pre-installed binary.
 const CHROMIUM = process.env.CHROMIUM_PATH;
+
+/**
+ * Read one painted pixel.
+ *
+ * Everything else here inspects the DOM, which is exactly how the bug this
+ * guards against slipped through: `.state` reported `hidden === true` while an
+ * author `display: grid` kept the opaque overlay painted over both images. Only
+ * the rendered output could catch that, so this screenshots a single pixel and
+ * decodes it - Chromium emits 8-bit RGBA, and for a 1x1 image every PNG filter
+ * degenerates to the raw bytes, so no image library is needed.
+ */
+async function pixelAt(page, x, y) {
+  const png = await page.screenshot({ clip: { x, y, width: 1, height: 1 } });
+
+  // The zlib stream may be split across several IDAT chunks, so collect them
+  // all before inflating rather than assuming one.
+  const parts = [];
+  let offset = 8;
+  while (offset < png.length) {
+    const length = png.readUInt32BE(offset);
+    const type = png.toString('ascii', offset + 4, offset + 8);
+    if (type === 'IDAT') parts.push(png.subarray(offset + 8, offset + 8 + length));
+    if (type === 'IEND') break;
+    offset += 12 + length;
+  }
+  if (parts.length === 0) throw new Error('no IDAT chunk in screenshot');
+
+  const raw = zlib.inflateSync(Buffer.concat(parts));
+  return [raw[1], raw[2], raw[3]];          // skip the per-row filter byte
+}
+
+const near = (actual, expected, tolerance = 24) =>
+  actual.every((channel, i) => Math.abs(channel - expected[i]) <= tolerance);
 
 const results = [];
 const check = (name, pass, detail = '') => results.push({ name, pass, detail });
@@ -98,6 +137,25 @@ const geometry = await page.locator('#c').evaluate((el) => {
 check('both images decoded (PNG encoder output is a valid image)', geometry.loaded);
 check('before/after layers are geometrically identical', geometry.same, `w=${geometry.w}`);
 
+// 4b. The overlay must cover while loading and *uncover* when done. This is the
+// regression guard: el.hidden alone was true in both states.
+{
+  const b = await page.locator('#c').boundingBox();
+  const probe = [Math.round(b.x + b.width * 0.25), Math.round(b.y + b.height / 2)];
+
+  const ready = await pixelAt(page, ...probe);
+  check('the original is painted once both images are set', near(ready, BEFORE_RGB), `rgb(${ready})`);
+
+  await page.evaluate(() => { window.__el.loading = true; });
+  const covered = await pixelAt(page, ...probe);
+  check('the working overlay covers the image while loading',
+    !near(covered, BEFORE_RGB) && !near(covered, AFTER_RGB), `rgb(${covered})`);
+
+  await page.evaluate(() => { window.__el.loading = false; });
+  const uncovered = await pixelAt(page, ...probe);
+  check('the working overlay stops painting when loading ends', near(uncovered, BEFORE_RGB), `rgb(${uncovered})`);
+}
+
 // 5. Drag with pointer, releasing OUTSIDE the element (the bug in the original).
 const box = await page.locator('#c').boundingBox();
 await page.mouse.move(box.x + box.width * 0.5, box.y + box.height / 2);
@@ -112,10 +170,16 @@ const events = await page.evaluate(() => window.__events);
 check('drag emits input events then a single change', events.filter((e) => e[0] === 'input').length > 1 && events.filter((e) => e[0] === 'change').length === 1,
   `inputs=${events.filter((e) => e[0] === 'input').length} changes=${events.filter((e) => e[0] === 'change').length}`);
 
-// 6. Clip path actually follows the position.
-const clip = await page.locator('#c').evaluate((el) =>
-  getComputedStyle(el.shadowRoot.querySelector('.after')).clipPath);
-check('reveal clip follows the position', /2[45]/.test(clip) || clip.includes('75'), clip);
+// 6. What is actually painted, at the position set by the drag above (~25%).
+{
+  const b = await page.locator('#c').boundingBox();
+  const midY = Math.round(b.y + b.height / 2);
+  const leftPixel = await pixelAt(page, Math.round(b.x + b.width * 0.10), midY);
+  const rightPixel = await pixelAt(page, Math.round(b.x + b.width * 0.60), midY);
+
+  check('the original is painted before the seam', near(leftPixel, BEFORE_RGB), `rgb(${leftPixel})`);
+  check('the render is painted after the seam', near(rightPixel, AFTER_RGB), `rgb(${rightPixel})`);
+}
 
 // 7. Keyboard operation.
 await page.focus('#c');

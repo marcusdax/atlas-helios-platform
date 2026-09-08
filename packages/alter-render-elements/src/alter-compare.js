@@ -32,7 +32,8 @@
  *
  * Theming (CSS custom properties, all optional)
  *   --alter-radius, --alter-aspect, --alter-surface, --alter-accent,
- *   --alter-handle-size, --alter-seam-width, --alter-label-bg, --alter-label-fg
+ *   --alter-handle-size, --alter-seam-width, --alter-label-bg, --alter-label-fg,
+ *   --alter-label-accent-fg (text on the accent-coloured render label)
  */
 
 const TEMPLATE = `
@@ -57,6 +58,12 @@ const TEMPLATE = `
   }
   :host([disabled]) { cursor: default; }
 
+  /* The hidden attribute is UA-level "display: none", which any author display
+     rule outranks - and .state and .handle both set one. Without this guard the
+     opaque overlay stays painted on top of the images while el.hidden claims it
+     is gone. */
+  [hidden] { display: none !important; }
+
   .layer {
     position: absolute;
     inset: 0;
@@ -73,12 +80,14 @@ const TEMPLATE = `
     pointer-events: none;
   }
   /* The reveal layer is full-size and clipped. Clipping (not resizing) is what
-     keeps the two photographs registered to each other at the seam. */
+     keeps the two photographs registered to each other at the seam.
+     It is inset from the leading edge so the rendered result occupies the side
+     its label is on: original left, render right. */
   .after {
-    clip-path: inset(0 var(--clip-right, 50%) 0 0);
+    clip-path: inset(0 0 0 var(--clip-start, 50%));
   }
   :host([orientation="vertical"]) .after {
-    clip-path: inset(0 0 var(--clip-bottom, 50%) 0);
+    clip-path: inset(var(--clip-start, 50%) 0 0 0);
   }
 
   .seam {
@@ -133,7 +142,15 @@ const TEMPLATE = `
     pointer-events: none;
   }
   .label.before { left: 12px; }
-  .label.after  { right: 12px; background: var(--alter-accent, #0ea5e9); color: #04121c; }
+  /* The render label sits on the accent colour, so its text colour cannot be
+     hardcoded: a host with a dark accent gets dark-on-dark. CSS has no portable
+     "pick a readable foreground" yet, so it is a token - the default suits the
+     light default accent, and dark accents set it to white. */
+  .label.after  {
+    right: 12px;
+    background: var(--alter-accent, #0ea5e9);
+    color: var(--alter-label-accent-fg, #04121c);
+  }
 
   .state {
     position: absolute;
@@ -354,10 +371,9 @@ export class AlterCompare extends HTMLElement {
 
     this.style.setProperty('--alter-fit', this.getAttribute('fit') === 'contain' ? 'contain' : 'cover');
 
-    // Clip from the trailing edge, so `position` reads as "how much of the
-    // after image is revealed".
-    const remainder = `${100 - this.#position}%`;
-    this.style.setProperty(this.vertical ? '--clip-bottom' : '--clip-right', remainder);
+    // The seam sits at `position`; the render is revealed beyond it. Both axes
+    // use one property because only the clip-path edge differs.
+    this.style.setProperty('--clip-start', `${this.#position}%`);
 
     const offset = `${this.#position}%`;
     if (this.vertical) {
@@ -430,7 +446,7 @@ export class AlterCompare extends HTMLElement {
       this.setAttribute('aria-valuemin', '0');
       this.setAttribute('aria-valuemax', '100');
       this.setAttribute('aria-valuenow', String(Math.round(this.#position)));
-      this.setAttribute('aria-valuetext', `${Math.round(this.#position)}% of the rendered result revealed`);
+      this.setAttribute('aria-valuetext', `${Math.round(100 - this.#position)}% of the rendered result visible`);
       this.setAttribute('aria-orientation', this.vertical ? 'vertical' : 'horizontal');
       if (!this.hasAttribute('aria-label')) {
         this.setAttribute('aria-label', 'Before and after comparison');

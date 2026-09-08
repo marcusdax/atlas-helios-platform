@@ -1,0 +1,39 @@
+{
+  "name": "propertyinsight-studio",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Standalone PropertyInsight Studio — property improvement rendering, targeting and campaign tooling built on the Alter render engine.",
+  "scripts": {
+    "dev": "concurrently -n api,web -c cyan,magenta \"npm:dev:api\" \"npm:dev:web\"",
+    "dev:api": "node --watch server/index.js",
+    "dev:web": "vite",
+    "build": "vite build",
+    "start": "NODE_ENV=production node server/index.js",
+    "preview": "npm run build && npm start",
+    "test": "node --test server/**/*.test.js"
+  },
+  "dependencies": {
+    "@alter/render-core": "file:../../packages/alter-render-core",
+    "@alter/render-elements": "file:../../packages/alter-render-elements",
+    "@alter/render-react": "file:../../packages/alter-render-react",
+    "@alter/render-server": "file:../../packages/alter-render-server",
+    "compression": "^1.7.4",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "express-rate-limit": "^7.4.0",
+    "helmet": "^7.1.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.1",
+    "autoprefixer": "^10.4.20",
+    "concurrently": "^8.2.2",
+    "postcss": "^8.4.47",
+    "supertest": "^7.0.0",
+    "tailwindcss": "^3.4.13",
+    "vite": "^5.4.8"
+  },
+  "engines": { "node": ">=18" }
+}
