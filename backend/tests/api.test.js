@@ -26,6 +26,7 @@ const { priceEstimate } = require('../src/routes/estimateRoutes');
 function buildApp() {
   const app = express();
   app.use(express.json({ limit: '10mb' }));
+  app.use('/api/auth', require('../src/routes/authRoutes'));
   app.use('/api/properties', require('../src/routes/propertyRoutes'));
   app.use('/api/storms', require('../src/routes/stormRoutes'));
   app.use('/api/assessments', require('../src/routes/assessmentRoutes'));
@@ -121,6 +122,28 @@ describe('authentication and tenancy', () => {
       .set(auth(fixtures.viewerToken))
       .send({ address: '5 New St', city: 'Dallas', state: 'TX', zip_code: '75201' })
       .expect(403);
+  });
+});
+
+describe('auth session routes', () => {
+  // These read req.user, which only the auth middleware sets. Without it they
+  // threw on undefined and returned 500 - so /me, /profile and /logout were all
+  // broken for every caller.
+  test('GET /me requires a token', async () => {
+    await request(app).get('/api/auth/me').expect(401);
+  });
+
+  test('GET /me returns the caller and their company', async () => {
+    const res = await request(app).get('/api/auth/me').set(auth(fixtures.tokenA)).expect(200);
+    const user = res.body.data?.user || res.body.user;
+
+    expect(user.email).toBe('ada@acme.test');
+    expect(res.body.data?.company?.name || res.body.company?.name).toBe('Acme Restoration');
+  });
+
+  test('logout and profile are behind the same middleware', async () => {
+    await request(app).post('/api/auth/logout').expect(401);
+    await request(app).put('/api/auth/profile').send({ name: 'X' }).expect(401);
   });
 });
 

@@ -1,6 +1,6 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
-const { generateToken, generateRefreshToken, verifyRefreshToken } = require('../middleware/auth');
+const { authMiddleware, generateToken, generateRefreshToken, verifyRefreshToken } = require('../middleware/auth');
 const { asyncHandler } = require('../middleware/errorHandler');
 const db = require('../../config/database');
 const logger = require('../utils/logger');
@@ -266,7 +266,7 @@ router.post('/refresh', asyncHandler(async (req, res) => {
  * @desc Logout user and invalidate refresh token
  * @access Private
  */
-router.post('/logout', asyncHandler(async (req, res) => {
+router.post('/logout', authMiddleware, asyncHandler(async (req, res) => {
   const { refreshToken } = req.body;
 
   if (refreshToken) {
@@ -287,7 +287,7 @@ router.post('/logout', asyncHandler(async (req, res) => {
  * @desc Get current user profile
  * @access Private
  */
-router.get('/me', asyncHandler(async (req, res) => {
+router.get('/me', authMiddleware, asyncHandler(async (req, res) => {
   // User is attached by auth middleware
   const user = req.user;
 
@@ -302,7 +302,7 @@ router.get('/me', asyncHandler(async (req, res) => {
 
   // Get user stats
   const stats = await db('properties')
-    .where('companyId', user.company_id || null)
+    .where('company_id', user.company_id || null)
     .count('id as total')
     .first();
 
@@ -330,7 +330,7 @@ router.get('/me', asyncHandler(async (req, res) => {
  * @desc Update user profile
  * @access Private
  */
-router.put('/profile', asyncHandler(async (req, res) => {
+router.put('/profile', authMiddleware, asyncHandler(async (req, res) => {
   const { name, email, currentPassword, newPassword } = req.body;
   const user = req.user;
 
