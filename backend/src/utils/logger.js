@@ -38,6 +38,32 @@ const fileFormat = winston.format.combine(
   winston.format.json(),
 );
 
+/**
+ * The log directory, resolved once and created before any file transport.
+ *
+ * Two things were wrong here. The path used process.cwd(), so where the logs
+ * landed depended on which directory the process was started from. And the
+ * directory was created *after* the transports that write into it - winston
+ * opens a File transport's stream at construction, so the stream failed to
+ * open, and the first exception written to that dead stream raised an
+ * unhandled 'error' that killed the process. The crash handler was destroying
+ * the evidence of the crash it existed to record.
+ */
+const fs = require('fs');
+const LOG_DIR = process.env.LOG_FILE_PATH
+  ? path.resolve(process.env.LOG_FILE_PATH)
+  : path.resolve(__dirname, '../../logs');
+
+try {
+  fs.mkdirSync(LOG_DIR, { recursive: true });
+} catch (error) {
+  // An unwritable log directory must not stop the process booting; the console
+  // transport still works, and that is better than no service at all.
+  console.warn(`[logger] could not create ${LOG_DIR}: ${error.message}`);
+}
+
+const logFile = (name) => path.join(LOG_DIR, name);
+
 // Define transports
 const transports = [
   // Console transport
@@ -47,7 +73,7 @@ const transports = [
   
   // Error log file
   new winston.transports.File({
-    filename: path.join(process.cwd(), 'logs', 'error.log'),
+    filename: logFile('error.log'),
     level: 'error',
     format: fileFormat,
     maxsize: 5242880, // 5MB
@@ -56,7 +82,7 @@ const transports = [
   
   // Combined log file
   new winston.transports.File({
-    filename: path.join(process.cwd(), 'logs', 'combined.log'),
+    filename: logFile('combined.log'),
     format: fileFormat,
     maxsize: 5242880, // 5MB
     maxFiles: 5,
@@ -68,20 +94,13 @@ if (process.env.NODE_ENV === 'development') {
   transports.push(
     // Debug log file
     new winston.transports.File({
-      filename: path.join(process.cwd(), 'logs', 'debug.log'),
+      filename: logFile('debug.log'),
       level: 'debug',
       format: fileFormat,
       maxsize: 5242880, // 5MB
       maxFiles: 3,
     })
   );
-}
-
-// Create logs directory if it doesn't exist
-const fs = require('fs');
-const logsDir = path.join(process.cwd(), 'logs');
-if (!fs.existsSync(logsDir)) {
-  fs.mkdirSync(logsDir, { recursive: true });
 }
 
 // Create the logger instance
@@ -96,7 +115,7 @@ const logger = winston.createLogger({
   // Handle exceptions
   exceptionHandlers: [
     new winston.transports.File({
-      filename: path.join(process.cwd(), 'logs', 'exceptions.log'),
+      filename: logFile('exceptions.log'),
       format: fileFormat,
     }),
   ],
@@ -104,11 +123,22 @@ const logger = winston.createLogger({
   // Handle rejections
   rejectionHandlers: [
     new winston.transports.File({
-      filename: path.join(process.cwd(), 'logs', 'rejections.log'),
+      filename: logFile('rejections.log'),
       format: fileFormat,
     }),
   ],
 });
+
+/**
+ * A failing transport must never crash the application it is recording.
+ * Without these listeners a stream error is an unhandled 'error' event, which
+ * Node turns into an uncaught exception - the logger taking down the service.
+ */
+for (const transport of [...transports, ...(logger.exceptions?.handlers?.values?.() || [])]) {
+  transport.on?.('error', (error) => {
+    console.warn(`[logger] transport error: ${error.message}`);
+  });
+}
 
 // Create a stream object for morgan middleware
 logger.stream = {
