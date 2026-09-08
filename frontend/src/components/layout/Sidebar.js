@@ -3,11 +3,10 @@ import { useLocation } from 'react-router-dom';
 import {
   ChartBarIcon,
   ExclamationTriangleIcon,
-  HomeIcon,
   MapIcon,
   UserGroupIcon,
   BellIcon
-} from '@heroicons/react/outline';
+} from '@heroicons/react/24/outline';
 
 const Sidebar = () => {
   const location = useLocation();

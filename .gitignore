@@ -30,3 +30,6 @@ logs
 *.log
 # Standalone app build output
 apps/*/dist
+
+# Frontend build output
+/frontend/build

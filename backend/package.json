@@ -7,7 +7,7 @@
     "start": "node server.js",
     "dev": "nodemon server.js",
     "build": "echo 'Build completed'",
-    "test": "jest",
+    "test": "NODE_ENV=test jest --runInBand --forceExit",
     "migrate": "knex migrate:latest",
     "seed": "knex seed:run",
     "setup": "npm run migrate && npm run seed"
@@ -33,12 +33,13 @@
     "compression": "^1.7.4",
     "express-rate-limit": "^6.6.0",
     "validator": "^13.7.0",
-    "uuid": "^14.0.2"
+    "@atlas/radar-map": "0.1.0"
   },
   "devDependencies": {
     "nodemon": "^2.0.20",
     "jest": "^29.3.1",
-    "supertest": "^6.3.3"
+    "supertest": "^6.3.3",
+    "sqlite3": "^5.1.7"
   },
   "keywords": [
     "property-insight",

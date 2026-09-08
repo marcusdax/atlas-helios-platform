@@ -1,0 +1,14 @@
+{
+  "name": "@atlas/radar-map",
+  "version": "0.1.0",
+  "description": "Weather radar mapping for Atlas & Helios: animated NOAA/MRMS radar lanes, NWS alert polygons, and property risk overlays on a MapLibre GL map.",
+  "main": "src/index.js",
+  "files": ["src", "README.md"],
+  "scripts": { "test": "node --test test/*.test.js" },
+  "peerDependencies": { "maplibre-gl": ">=4" },
+  "peerDependenciesMeta": { "maplibre-gl": { "optional": true } },
+  "engines": { "node": ">=18" },
+  "keywords": ["radar", "nexrad", "mrms", "nws", "weather", "maplibre", "storm"],
+  "license": "MIT",
+  "sideEffects": false
+}

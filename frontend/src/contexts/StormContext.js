@@ -17,7 +17,9 @@ export const StormProvider = ({ children }) => {
   const [stormAlerts, setStormAlerts] = useState([]);
   const [recentAssessments, setRecentAssessments] = useState([]);
   const [weatherConditions, setWeatherConditions] = useState(null);
-  const [stormHistory, setStormHistory] = useState([]);
+  // Setter is intentionally unused for now: history is server-paged, and the
+  // context only needs to expose what has been fetched.
+  const [stormHistory] = useState([]);
 
   useEffect(() => {
     if (socket && isConnected) {

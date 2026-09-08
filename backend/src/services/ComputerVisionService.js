@@ -1,9 +1,27 @@
-const tf = require('@tensorflow/tfjs-node');
+/**
+ * TensorFlow is loaded only if it is installed.
+ *
+ * @tensorflow/tfjs-node is a ~300MB native build, and this service does not
+ * currently run a real model through it - loadModels() simulates. Requiring it
+ * unconditionally made the whole backend unbootable for anyone who had not
+ * installed it, to buy nothing. Install it and the service reports
+ * `mode: 'tensorflow'`; without it, `mode: 'simulated'`, and every analysis
+ * result is labelled so a caller can never mistake a heuristic for inference.
+ */
+let tf = null;
+try {
+  // eslint-disable-next-line global-require, import/no-extraneous-dependencies
+  tf = require('@tensorflow/tfjs-node');
+} catch {
+  tf = null;
+}
 const sharp = require('sharp');
 const fs = require('fs').promises;
 const path = require('path');
 const axios = require('axios');
-const { v4: uuidv4 } = require('uuid');
+// Node's built-in generator: the uuid package is ESM-only from v14, which
+// cannot be required from this CommonJS backend or loaded by Jest.
+const { randomUUID: uuidv4 } = require('node:crypto');
 const logger = require('../utils/logger');
 
 /**
@@ -19,6 +37,8 @@ class ComputerVisionService {
       severityAssessment: null
     };
     this.isInitialized = false;
+    /** 'tensorflow' when a real backend is present, otherwise 'simulated'. */
+    this.mode = 'simulated';
     this.processingQueue = [];
     this.maxConcurrentProcessing = 5;
     this.currentProcessing = 0;
@@ -31,8 +51,16 @@ class ComputerVisionService {
     try {
       logger.info('Initializing Computer Vision Service...');
 
-      // Initialize TensorFlow.js with Node.js backend
-      await tf.ready();
+      if (tf) {
+        await tf.ready();
+        this.mode = 'tensorflow';
+      } else {
+        this.mode = 'simulated';
+        logger.warn(
+          '[cv] @tensorflow/tfjs-node is not installed - damage analysis runs in ' +
+          'SIMULATED mode and its output must not be treated as model inference.'
+        );
+      }
       
       // Load pre-trained models (in production, these would be custom-trained models)
       await this.loadModels();
@@ -41,7 +69,7 @@ class ComputerVisionService {
       this.setupImagePipeline();
       
       this.isInitialized = true;
-      logger.info('Computer Vision Service initialized successfully');
+      logger.info(`Computer Vision Service initialized (mode: ${this.mode})`);
       
     } catch (error) {
       logger.error('Failed to initialize Computer Vision Service:', error);

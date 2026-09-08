@@ -8,7 +8,7 @@ import {
   CalculatorIcon,
   CogIcon,
   DevicePhoneMobileIcon
-} from '@heroicons/react/outline';
+} from '@heroicons/react/24/outline';
 
 const Navigation = () => {
   const location = useLocation();

@@ -1,6 +1,8 @@
 const axios = require('axios');
 const cron = require('node-cron');
-const { v4: uuidv4 } = require('uuid');
+// Node's built-in generator: the uuid package is ESM-only from v14, which
+// cannot be required from this CommonJS backend or loaded by Jest.
+const { randomUUID: uuidv4 } = require('node:crypto');
 const db = require('../../config/database');
 const logger = require('../utils/logger');
 

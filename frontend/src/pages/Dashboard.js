@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   CloudIcon,
   MapIcon,
@@ -6,7 +6,7 @@ import {
   ExclamationTriangleIcon,
   HomeIcon,
   UserGroupIcon
-} from '@heroicons/react/outline';
+} from '@heroicons/react/24/outline';
 import { motion } from 'framer-motion';
 
 // Import components
@@ -33,36 +33,7 @@ const Dashboard = () => {
 
   const [recentActivity, setRecentActivity] = useState([]);
 
-  useEffect(() => {
-    // Fetch dashboard data
-    fetchDashboardData();
-    
-    // Subscribe to real-time updates
-    if (socket && isConnected) {
-      socket.emit('join_room', 'dashboard');
-      
-      socket.on('dashboard_update', (data) => {
-        setDashboardData(data);
-      });
-
-      socket.on('storm_alert', (alert) => {
-        setRecentActivity(prev => [{
-          id: Date.now(),
-          type: 'storm',
-          message: `${alert.type} detected in ${alert.region}`,
-          timestamp: new Date(),
-          severity: alert.severity
-        }, ...prev.slice(0, 9)]);
-      });
-
-      return () => {
-        socket.off('dashboard_update');
-        socket.off('storm_alert');
-      };
-    }
-  }, [socket, isConnected]);
-
-  const fetchDashboardData = async () => {
+  const fetchDashboardData = useCallback(async () => {
     try {
       // In real implementation, this would be an API call
       const mockData = {
@@ -103,7 +74,38 @@ const Dashboard = () => {
     } catch (error) {
       console.error('Failed to fetch dashboard data:', error);
     }
-  };
+  }, [activeStorms.length, recentAssessments.length]);
+
+  useEffect(() => {
+    // Fetch dashboard data
+    fetchDashboardData();
+    
+    // Subscribe to real-time updates
+    if (socket && isConnected) {
+      socket.emit('join_room', 'dashboard');
+      
+      socket.on('dashboard_update', (data) => {
+        setDashboardData(data);
+      });
+
+      socket.on('storm_alert', (alert) => {
+        setRecentActivity(prev => [{
+          id: Date.now(),
+          type: 'storm',
+          message: `${alert.type} detected in ${alert.region}`,
+          timestamp: new Date(),
+          severity: alert.severity
+        }, ...prev.slice(0, 9)]);
+      });
+
+      return () => {
+        socket.off('dashboard_update');
+        socket.off('storm_alert');
+      };
+    }
+  }, [socket, isConnected, fetchDashboardData]);
+
+
 
   const quickActions = [
     {

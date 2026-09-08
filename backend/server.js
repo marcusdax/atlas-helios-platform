@@ -24,10 +24,11 @@ const assessmentRoutes = require('./src/routes/assessmentRoutes');
 const leadRoutes = require('./src/routes/leadRoutes');
 const estimateRoutes = require('./src/routes/estimateRoutes');
 const renderRoutes = require('./src/routes/renderRoutes');
+const radarRoutes = require('./src/routes/radarRoutes');
 
 // Middleware
-const authMiddleware = require('./src/middleware/auth');
-const errorHandler = require('./src/middleware/errorHandler');
+const { authMiddleware } = require('./src/middleware/auth');
+const { errorHandler } = require('./src/middleware/errorHandler');
 const logger = require('./src/utils/logger');
 
 const app = express();
@@ -82,7 +83,10 @@ app.get('/health', (req, res) => {
     status: 'OK',
     timestamp: new Date().toISOString(),
     version: process.env.npm_package_version || '1.0.0',
-    database: db.client,
+    // The Knex client object is circular (it holds its own pool and timers),
+    // so serialising it made the health check itself a 500 - the one endpoint
+    // that must never fail. Report the dialect name instead.
+    database: db.client?.config?.client || 'unknown',
     uptime: process.uptime()
   });
 });
@@ -95,6 +99,7 @@ app.use('/api/assessments', assessmentRoutes);
 app.use('/api/leads', leadRoutes);
 app.use('/api/estimates', estimateRoutes);
 app.use('/api/renders', renderRoutes);
+app.use('/api/radar', radarRoutes);
 
 // Protected routes (require authentication)
 app.use('/api/private', authMiddleware, (req, res) => {
