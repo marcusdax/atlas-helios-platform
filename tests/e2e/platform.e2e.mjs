@@ -90,6 +90,23 @@ const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css
 
 const web = http.createServer((req, res) => {
   const url = req.url.split('?')[0];
+
+  // Same-origin API proxy. Serving the app and the API from one origin is what
+  // the deployment does (nginx in front of both), and it keeps the browser from
+  // treating every authenticated call as cross-origin.
+  if (url.startsWith('/api') || url.startsWith('/socket.io') || url === '/health') {
+    const upstream = http.request(
+      { host: '127.0.0.1', port: Number(API_PORT), path: req.url, method: req.method, headers: req.headers },
+      (proxied) => {
+        res.writeHead(proxied.statusCode, proxied.headers);
+        proxied.pipe(res);
+      }
+    );
+    upstream.on('error', () => { res.writeHead(502); res.end('{"error":"upstream"}'); });
+    req.pipe(upstream);
+    return;
+  }
+
   let file = path.join(BUILD, url === '/' ? 'index.html' : url);
   if (!file.startsWith(BUILD) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) {
     file = path.join(BUILD, 'index.html');
@@ -97,6 +114,30 @@ const web = http.createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream' });
   res.end(fs.readFileSync(file));
 });
+/**
+ * Proxy the WebSocket upgrade too. Socket.IO now connects to the page's own
+ * origin, so without this the handshake would 404 against the static server -
+ * the same thing nginx has to be configured for in a real deployment.
+ */
+web.on('upgrade', (req, socket, head) => {
+  const upstream = http.request({
+    host: '127.0.0.1', port: Number(API_PORT), path: req.url, method: req.method,
+    headers: req.headers
+  });
+  upstream.on('upgrade', (upstreamRes, upstreamSocket, upstreamHead) => {
+    socket.write(
+      `HTTP/1.1 101 Switching Protocols\r\n` +
+      Object.entries(upstreamRes.headers).map(([k, v]) => `${k}: ${v}`).join('\r\n') +
+      '\r\n\r\n'
+    );
+    if (upstreamHead?.length) socket.write(upstreamHead);
+    upstreamSocket.pipe(socket).pipe(upstreamSocket);
+  });
+  upstream.on('error', () => socket.destroy());
+  if (head?.length) upstream.write(head);
+  upstream.end();
+});
+
 await new Promise((r) => web.listen(Number(WEB_PORT), r));
 
 const waitFor = async (url, timeoutMs = 20000) => {
@@ -128,11 +169,7 @@ try {
   browser = await chromium.launch(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {});
   const context = await browser.newContext({ viewport: { width: 1400, height: 950 } });
 
-  // The app calls /api on its own origin; point that at the API port.
-  await context.route(`**://127.0.0.1:${WEB_PORT}/api/**`, (route) => {
-    const url = new URL(route.request().url());
-    return route.continue({ url: `http://127.0.0.1:${API_PORT}${url.pathname}${url.search}` });
-  });
+
 
   /**
    * Stub the third-party map and weather traffic. The point of the suite is
@@ -179,7 +216,14 @@ try {
   const pageErrors = [];
   page.on('pageerror', (e) => pageErrors.push(e.message));
   page.on('console', (m) => {
-    if (m.type() === 'error' && !m.location().url.includes('favicon')) pageErrors.push(m.text());
+    if (m.type() !== 'error') return;
+    const from = m.location().url || '';
+    // Only errors from our own origin count. A blocked third-party fetch - the
+    // Google Fonts @import, a favicon - says something about the network the
+    // suite is running on, not about this application, and failing on it would
+    // make the suite unusable in any restricted environment.
+    const ours = from.startsWith(`http://127.0.0.1:${WEB_PORT}`) && !from.includes('favicon');
+    if (ours) pageErrors.push(`${m.text()} (${from})`);
   });
 
 
@@ -203,7 +247,10 @@ try {
   check('a MapLibre GL canvas is mounted', true);
 
   await page.waitForSelector('text=Active storm events', { timeout: 10000 });
-  const stormRow = await page.getByText('Dallas Metro').first().isVisible();
+  // Wait for the row itself: asserting visibility straight after the card title
+  // races the fetch that fills it.
+  const stormRow = await page.getByText('Dallas Metro').first()
+    .waitFor({ timeout: 15000 }).then(() => true).catch(() => false);
   check('the active storm reaches the page from the API', stormRow);
 
   const playButton = page.getByRole('button', { name: /Play|Pause/ });
@@ -232,7 +279,12 @@ try {
   // ---- a real write through the real API ----
   step('creating an estimate');
   await page.goto(`http://127.0.0.1:${WEB_PORT}/estimate-generator`, { waitUntil: 'domcontentloaded' });
-  await page.waitForSelector('#property option:nth-child(2)', { timeout: 10000 });
+  // An <option> has no layout box, so Playwright never considers it visible and
+  // waitForSelector would wait forever. Wait on the option count instead.
+  await page.waitForFunction(
+    () => (document.querySelector('#property')?.options.length || 0) > 1,
+    null, { timeout: 20000 }
+  );
   await page.selectOption('#property', { index: 1 });
   await page.fill('input[placeholder="Description"]', 'Roof replacement');
   await page.fill('input[placeholder="Unit $"]', '18500');
