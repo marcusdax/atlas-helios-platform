@@ -1,0 +1,34 @@
+{
+  "name": "@alter/render-elements",
+  "version": "0.1.0",
+  "description": "Framework-agnostic <alter-compare> before/after slider custom element.",
+  "type": "module",
+  "main": "src/index.js",
+  "module": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./alter-compare.js": "./src/alter-compare.js"
+  },
+  "files": [
+    "src",
+    "README.md"
+  ],
+  "keywords": [
+    "web-components",
+    "custom-elements",
+    "before-after",
+    "image-comparison",
+    "slider"
+  ],
+  "license": "MIT",
+  "sideEffects": [
+    "./src/alter-compare.js",
+    "./src/index.js"
+  ],
+  "scripts": {
+    "test": "node test/browser.test.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.40.0"
+  }
+}

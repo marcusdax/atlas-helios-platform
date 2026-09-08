@@ -1,0 +1,14 @@
+{
+  "name": "@alter/render-react",
+  "version": "0.1.0",
+  "description": "React bindings for the Alter before/after render engine: useAlterRender hook and AlterCompare component.",
+  "type": "module",
+  "main": "src/index.js",
+  "module": "src/index.js",
+  "exports": { ".": "./src/index.js" },
+  "files": ["src", "README.md"],
+  "peerDependencies": { "react": ">=17" },
+  "dependencies": { "@alter/render-elements": "0.1.0" },
+  "license": "MIT",
+  "sideEffects": false
+}

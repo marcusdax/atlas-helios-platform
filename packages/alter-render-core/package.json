@@ -1,0 +1,14 @@
+{
+  "name": "@alter/render-core",
+  "version": "0.1.0",
+  "description": "Framework-agnostic before/after property render engine: providers, prompt guardrails, idempotency, retry, circuit breaking.",
+  "main": "src/index.js",
+  "files": ["src", "README.md"],
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
+  "engines": { "node": ">=18" },
+  "keywords": ["ai", "image-generation", "before-after", "property", "renovation", "visualization"],
+  "license": "MIT",
+  "sideEffects": false
+}

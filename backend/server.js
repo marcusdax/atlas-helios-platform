@@ -23,6 +23,7 @@ const propertyRoutes = require('./src/routes/propertyRoutes');
 const assessmentRoutes = require('./src/routes/assessmentRoutes');
 const leadRoutes = require('./src/routes/leadRoutes');
 const estimateRoutes = require('./src/routes/estimateRoutes');
+const renderRoutes = require('./src/routes/renderRoutes');
 
 // Middleware
 const authMiddleware = require('./src/middleware/auth');
@@ -93,6 +94,7 @@ app.use('/api/properties', propertyRoutes);
 app.use('/api/assessments', assessmentRoutes);
 app.use('/api/leads', leadRoutes);
 app.use('/api/estimates', estimateRoutes);
+app.use('/api/renders', renderRoutes);
 
 // Protected routes (require authentication)
 app.use('/api/private', authMiddleware, (req, res) => {

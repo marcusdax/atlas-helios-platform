@@ -15,7 +15,8 @@
     "docker:up": "docker-compose up -d",
     "docker:down": "docker-compose down",
     "deploy:staging": "npm run build && docker-compose -f docker-compose.staging.yml up -d",
-    "deploy:production": "npm run build && docker-compose -f docker-compose.prod.yml up -d"
+    "deploy:production": "npm run build && docker-compose -f docker-compose.prod.yml up -d",
+    "test:packages": "npm test --workspace=@alter/render-core && npm test --workspace=@alter/render-server"
   },
   "keywords": [
     "property-insight",
@@ -33,6 +34,7 @@
   "workspaces": [
     "frontend",
     "backend",
-    "mobile"
+    "mobile",
+    "packages/*"
   ]
 }
