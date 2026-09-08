@@ -240,6 +240,34 @@ PUT  /api/estimates/:id       # Update estimate
 POST /api/estimates/:id/send  # Send estimate
 ```
 
+### Alter Rendering Engine
+```
+POST /api/renders             # Render a before/after improvement (?mode=async for a job)
+GET  /api/renders/:id         # Poll an async render
+GET  /api/renders/industries  # Trade presets for the picker
+```
+
+## 🎨 Alter Rendering Engine
+
+The before/after property renderer is packaged separately from the platform, under
+[`packages/`](packages/README.md), so it can be reused in other products:
+
+| Package | What it is |
+|---|---|
+| `@alter/render-core` | The engine — providers, prompt guardrails, idempotency, retry, circuit breaking, caching, telemetry. No framework, no DOM. |
+| `@alter/render-server` | A mountable Express router. The only place the provider API key exists. |
+| `@alter/render-elements` | `<alter-compare>`, the before/after slider as a custom element — works with or without a framework. |
+| `@alter/render-react` | The `useAlterRender` hook and an `<AlterCompare>` component. |
+
+Inside this repo they are wired up by `backend/src/routes/renderRoutes.js`,
+`frontend/src/lib/renderer.js`, and `frontend/src/components/render/AlterRenderPanel.js`.
+[`examples/vanilla.html`](examples/vanilla.html) shows the same engine driven from a plain
+HTML page with no build step.
+
+With no `ALTER_RENDER_API_KEY` configured the engine boots on a mock provider that returns
+real (synthetic) images offline, so the feature is demoable and testable before any key is
+provisioned. See [`packages/README.md`](packages/README.md) for the full guide.
+
 ## 🔒 Security
 
 ### Authentication & Authorization
