@@ -131,9 +131,16 @@ web.on('upgrade', (req, socket, head) => {
       '\r\n\r\n'
     );
     if (upstreamHead?.length) socket.write(upstreamHead);
+    upstreamSocket.on('error', () => socket.destroy());
     upstreamSocket.pipe(socket).pipe(upstreamSocket);
   });
-  upstream.on('error', () => socket.destroy());
+  // A browser navigating away resets the socket. Both ends need an error
+  // handler or that perfectly normal disconnect is an uncaught exception -
+  // which is what was killing this suite mid-run.
+  const drop = () => socket.destroy();
+  upstream.on('error', drop);
+  socket.on('error', drop);
+
   if (head?.length) upstream.write(head);
   upstream.end();
 });
