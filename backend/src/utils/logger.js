@@ -130,15 +130,36 @@ const logger = winston.createLogger({
 });
 
 /**
- * A failing transport must never crash the application it is recording.
- * Without these listeners a stream error is an unhandled 'error' event, which
- * Node turns into an uncaught exception - the logger taking down the service.
+ * A failing logger must never crash the application it is recording.
+ *
+ * Winston pipes through internal PassThrough streams, so a write to a closed
+ * transport surfaces as an 'error' on the logger itself - not on the transport.
+ * Listening only on the transports left that unhandled, and Node turns an
+ * unhandled 'error' into an uncaught exception. Both are covered here.
  */
-for (const transport of [...transports, ...(logger.exceptions?.handlers?.values?.() || [])]) {
+logger.on('error', (error) => {
+  console.warn(`[logger] ${error.message}`);
+});
+
+for (const transport of transports) {
   transport.on?.('error', (error) => {
     console.warn(`[logger] transport error: ${error.message}`);
   });
 }
+
+/**
+ * Winston's exceptionHandlers intercept an uncaught exception to write it to a
+ * file. When that write fails the original error is lost and the process dies
+ * with winston's stack instead - which is exactly what happened here, twice.
+ * These print the real error to the console first, so the cause is always
+ * visible whatever the file transports are doing.
+ */
+process.on('uncaughtException', (error) => {
+  console.error('[uncaughtException]', error?.stack || error);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[unhandledRejection]', reason?.stack || reason);
+});
 
 // Create a stream object for morgan middleware
 logger.stream = {
