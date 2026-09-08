@@ -192,7 +192,14 @@ try {
   const pageErrors = [];
   page.on('pageerror', (e) => pageErrors.push(e.message));
   page.on('console', (m) => {
-    if (m.type() === 'error' && !m.location().url.includes('favicon')) pageErrors.push(m.text());
+    if (m.type() !== 'error') return;
+    const from = m.location().url || '';
+    // Only errors from our own origin count. A blocked third-party fetch - the
+    // Google Fonts @import, a favicon - says something about the network the
+    // suite is running on, not about this application, and failing on it would
+    // make the suite unusable in any restricted environment.
+    const ours = from.startsWith(`http://127.0.0.1:${WEB_PORT}`) && !from.includes('favicon');
+    if (ours) pageErrors.push(`${m.text()} (${from})`);
   });
 
 
