@@ -28,7 +28,7 @@
     "workbox-precaching": "^6.5.4",
     "workbox-routing": "^6.5.4",
     "workbox-strategies": "^6.5.4",
-    "maplibre-gl": "^4.7.1",
+    "maplibre-gl": "^6.9.1",
     "@atlas/radar-map": "0.1.0"
   },
   "scripts": {
