@@ -59,7 +59,7 @@
   "proxy": "http://localhost:5000",
   "devDependencies": {
     "tailwindcss": "^3.4.13",
-    "postcss": "^8.4.47",
+    "postcss": "^8.5.23",
     "autoprefixer": "^10.4.20"
   }
 }
