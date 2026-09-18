@@ -153,6 +153,13 @@ for (const transport of transports) {
  * with winston's stack instead - which is exactly what happened here, twice.
  * These print the real error to the console first, so the cause is always
  * visible whatever the file transports are doing.
+ *
+ * They do not change whether the process survives: winston's exitOnError is
+ * already false above, so an uncaught exception was never going to terminate
+ * this service. That is a deliberate choice made elsewhere in this file, and
+ * worth revisiting - continuing after an uncaught exception means running on
+ * unknown state - but it is not a decision a logging module should quietly
+ * flip.
  */
 process.on('uncaughtException', (error) => {
   console.error('[uncaughtException]', error?.stack || error);
