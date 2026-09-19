@@ -210,10 +210,20 @@ GET  /api/properties/search   # Search properties
 
 ### Storm Intelligence
 ```
-GET  /api/storms              # Get active storms
-GET  /api/storms/:id          # Get storm details
-POST /api/storms/track        # Start storm tracking
+GET  /api/storms              # Get active storms (optionally within a viewport)
+GET  /api/storms/:id          # Get storm details + your exposure
+GET  /api/storms/regions      # Monitoring regions Atlas polls
+POST /api/storms/track        # Register a monitoring region
 GET  /api/storms/report/:id   # Get storm report
+GET  /api/storms/:id/properties  # Properties in the footprint, scored
+```
+
+### Radar & Mapping
+```
+GET  /api/radar/config        # Providers, basemaps and defaults for the map
+GET  /api/radar/frames        # Two-hour radar loop + nowcast, with tile URLs
+GET  /api/radar/alerts        # Active NWS warning polygons (GeoJSON)
+GET  /api/radar/exposure      # Your properties inside an active warning
 ```
 
 ### Property Assessments
@@ -239,6 +249,65 @@ GET  /api/estimates/:id       # Get estimate
 PUT  /api/estimates/:id       # Update estimate
 POST /api/estimates/:id/send  # Send estimate
 ```
+
+### Alter Rendering Engine
+```
+POST /api/renders             # Render a before/after improvement (?mode=async for a job)
+GET  /api/renders/:id         # Poll an async render
+GET  /api/renders/industries  # Trade presets for the picker
+```
+
+## 🎨 Alter Rendering Engine
+
+The before/after property renderer is packaged separately from the platform, under
+[`packages/`](packages/README.md), so it can be reused in other products:
+
+| Package | What it is |
+|---|---|
+| `@alter/render-core` | The engine — providers, prompt guardrails, idempotency, retry, circuit breaking, caching, telemetry. No framework, no DOM. |
+| `@alter/render-server` | A mountable Express router. The only place the provider API key exists. |
+| `@alter/render-elements` | `<alter-compare>`, the before/after slider as a custom element — works with or without a framework. |
+| `@alter/render-react` | The `useAlterRender` hook and an `<AlterCompare>` component. |
+
+A standalone app built on them lives in
+[`apps/propertyinsight-studio`](apps/propertyinsight-studio/README.md) — the full
+PropertyInsight product (render studio, suggestions, geospatial screening, campaign
+one-pagers, market framing) with its own server, build and deploy, independent of the
+Atlas & Helios backend.
+
+Inside this repo they are also wired up by `backend/src/routes/renderRoutes.js`,
+`frontend/src/lib/renderer.js`, and `frontend/src/components/render/AlterRenderPanel.js`.
+[`examples/vanilla.html`](examples/vanilla.html) shows the same engine driven from a plain
+HTML page with no build step.
+
+With no `ALTER_RENDER_API_KEY` configured the engine boots on a mock provider that returns
+real (synthetic) images offline, so the feature is demoable and testable before any key is
+provisioned. See [`packages/README.md`](packages/README.md) for the full guide.
+
+## 🗺️ Radar & Mapping
+
+Live weather mapping is packaged as [`@atlas/radar-map`](packages/atlas-radar-map/README.md):
+an animated NOAA radar mosaic, NWS warning polygons, and a property-risk overlay
+on a MapLibre GL map. The React component that drives it is
+`frontend/src/components/maps/RadarMap.js`, and it powers the Storm Intelligence page.
+
+The radar approach is adapted from [OpenRadar](https://github.com/marcusdax/OpenRadar)
+(MIT), keeping its premise: **the data is public**. NOAA publishes every radar
+mosaic and warning polygon free, so nothing here needs an API key.
+
+| Capability | Notes |
+|---|---|
+| Two-hour radar loop | Play, pause, scrub, speed, opacity, jump-to-live |
+| Two-lane cross-fade | Scrubbing reuses two tile sources instead of rebuilding one per frame |
+| NWS warning polygons | Severity-ranked and ordered so a tornado warning is never buried |
+| Property risk overlay | GPU circle layer, data-driven colour by damage probability |
+| Exposure join | Point-in-polygon against your book of business — the dispatch list |
+
+OpenRadar's Rust NEXRAD/GRIB2 decoding is **not** ported: that is a desktop app
+with a native sidecar, and this is a browser in a field truck. The browser
+consumes rendered tiles and the server proxies the JSON documents — same data,
+one decode boundary earlier. See the
+[package README](packages/atlas-radar-map/README.md) for what carried over.
 
 ## 🔒 Security
 

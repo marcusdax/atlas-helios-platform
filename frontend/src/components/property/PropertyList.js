@@ -1,5 +1,5 @@
 import React from 'react';
-import { ClockIcon, MapPinIcon } from '@heroicons/react/outline';
+import { ClockIcon, MapPinIcon } from '@heroicons/react/24/outline';
 
 const PropertyList = ({ properties, compact = false }) => {
   const getRiskColor = (risk) => {
@@ -132,9 +132,9 @@ const PropertyList = ({ properties, compact = false }) => {
           {compact && property.details && (
             <div className="mt-2 pt-2 border-t border-neutral-700">
               <div className="flex items-center justify-between text-xs text-neutral-400">
-                <span>{property.details.propertyType}</span>{property.details.square ft</span>
-Footage} sq                <span>{>
-                <spanproperty.details.yearBuilt}</span>
+                <span>{property.details.propertyType}</span>
+                <span>{property.details.squareFootage} sq ft</span>
+                <span>{property.details.yearBuilt}</span>
               </div>
             </div>
           )}

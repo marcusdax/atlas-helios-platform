@@ -22,8 +22,12 @@ const authMiddleware = async (req, res, next) => {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     
     // Get user from database
+    // `status` must be selected: the check below compares against it, and
+    // omitting it made every authenticated request fail with 401 because
+    // undefined is never 'active'. `platform_admin` is what lets a platform
+    // operator read across companies.
     const user = await db('users')
-      .select('id', 'email', 'name', 'role', 'company_id', 'created_at')
+      .select('id', 'email', 'name', 'role', 'company_id', 'status', 'platform_admin', 'created_at')
       .where('id', decoded.userId)
       .first();
 

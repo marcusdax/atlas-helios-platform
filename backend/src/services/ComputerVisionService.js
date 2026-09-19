@@ -24,6 +24,8 @@ class ComputerVisionService {
       severityAssessment: null
     };
     this.isInitialized = false;
+    /** 'tensorflow' when a real backend is present, otherwise 'simulated'. */
+    this.mode = 'simulated';
     this.processingQueue = [];
     this.maxConcurrentProcessing = 5;
     this.currentProcessing = 0;
@@ -36,8 +38,16 @@ class ComputerVisionService {
     try {
       logger.info('Initializing Computer Vision Service...');
 
-      // Initialize TensorFlow.js with Node.js backend
-      await tf.ready();
+      if (tf) {
+        await tf.ready();
+        this.mode = 'tensorflow';
+      } else {
+        this.mode = 'simulated';
+        logger.warn(
+          '[cv] @tensorflow/tfjs-node is not installed - damage analysis runs in ' +
+          'SIMULATED mode and its output must not be treated as model inference.'
+        );
+      }
       
       // Load pre-trained models (in production, these would be custom-trained models)
       await this.loadModels();
@@ -46,7 +56,7 @@ class ComputerVisionService {
       this.setupImagePipeline();
       
       this.isInitialized = true;
-      logger.info('Computer Vision Service initialized successfully');
+      logger.info(`Computer Vision Service initialized (mode: ${this.mode})`);
       
     } catch (error) {
       logger.error('Failed to initialize Computer Vision Service:', error);

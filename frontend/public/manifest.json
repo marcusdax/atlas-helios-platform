@@ -1,0 +1,17 @@
+{
+  "short_name": "Atlas & Helios",
+  "name": "Atlas & Helios — PropertyInsight AI",
+  "description": "Storm intelligence and AI property estimating for the restoration industry.",
+  "start_url": ".",
+  "display": "standalone",
+  "orientation": "any",
+  "theme_color": "#0A0A0A",
+  "background_color": "#0A0A0A",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⛈️</text></svg>",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alter Render — plain HTML integration</title>
+<style>
+  :root { color-scheme: dark; }
+  body {
+    margin: 0; padding: 32px 20px; background: #07090c; color: #e6edf3;
+    font: 15px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  main { max-width: 860px; margin: 0 auto; display: grid; gap: 24px; }
+  h1 { font-size: 22px; margin: 0; }
+  p  { margin: 0; color: #94a3b8; }
+  fieldset { border: 1px solid #1e293b; border-radius: 12px; padding: 16px; display: grid; gap: 12px; }
+  legend { padding: 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: #64748b; }
+  label { font-size: 13px; color: #cbd5e1; display: grid; gap: 6px; }
+  input, select, textarea, button {
+    font: inherit; padding: 9px 12px; border-radius: 8px;
+    border: 1px solid #1e293b; background: #0f172a; color: #e6edf3;
+  }
+  button { background: #38bdf8; color: #04121c; font-weight: 650; border: 0; cursor: pointer; }
+  button:disabled { background: #1e293b; color: #64748b; cursor: not-allowed; }
+  alter-compare { --alter-accent: #38bdf8; --alter-surface: #0b1220; }
+  .status { min-height: 20px; font-size: 13px; color: #f87171; }
+  code { background: #0f172a; padding: 1px 5px; border-radius: 4px; font-size: 13px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Alter Render in plain HTML</h1>
+    <p>
+      No framework, no build step, no bundler. The same <code>&lt;alter-compare&gt;</code> element
+      that the React app uses, driven by two <code>&lt;script&gt;</code> tags. Drag the seam, or
+      focus it and use the arrow keys.
+    </p>
+  </header>
+
+  <alter-compare id="compare" label-after="Alter render"></alter-compare>
+
+  <fieldset>
+    <legend>Render a photo</legend>
+    <label>Property photo
+      <input type="file" id="photo" accept="image/jpeg,image/png,image/webp">
+    </label>
+    <label>Trade
+      <select id="industry"></select>
+    </label>
+    <label>What needs to change
+      <textarea id="description" rows="2" maxlength="600"
+        placeholder="Shingles are curling and there is moss on the north slope"></textarea>
+    </label>
+    <button id="submit" disabled>Render the improvement</button>
+    <div class="status" id="status" role="status" aria-live="polite"></div>
+  </fieldset>
+</main>
+
+<script type="module">
+  // 1. The element. One import registers <alter-compare> globally.
+  //    In a real deployment this is a package import or a <script src> to your CDN.
+  import '../packages/alter-render-elements/src/alter-compare.js';
+
+  const compare = document.getElementById('compare');
+  const statusEl = document.getElementById('status');
+  const submit = document.getElementById('submit');
+  const photo = document.getElementById('photo');
+  const description = document.getElementById('description');
+  const industrySelect = document.getElementById('industry');
+
+  // 2. Your API. This is the only integration point: POST the photo, get a
+  //    render back. The endpoint is @alter/render-server mounted in your app,
+  //    which is where the provider key lives. Nothing secret is in this file.
+  const ENDPOINT = new URLSearchParams(location.search).get('api') || '/api/renders';
+
+  async function loadIndustries() {
+    try {
+      const response = await fetch(`${ENDPOINT}/industries`);
+      const { industries } = await response.json();
+      return industries;
+    } catch {
+      // Offline: seed the picker so the page is still usable as a slider demo.
+      return [
+        { id: 'roofing', label: 'Roofing' },
+        { id: 'garage-doors', label: 'Garage Doors' },
+        { id: 'exterior-paint', label: 'Exterior Painting / Siding' }
+      ];
+    }
+  }
+
+  for (const item of await loadIndustries()) {
+    industrySelect.add(new Option(item.label, item.id));
+  }
+
+  const toDataUrl = (file) => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error('Could not read that file.'));
+    reader.readAsDataURL(file);
+  });
+
+  let image = null;
+
+  photo.addEventListener('change', async (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+    image = await toDataUrl(file);
+    compare.before = image;
+    compare.after = '';
+    statusEl.textContent = '';
+    refresh();
+  });
+
+  description.addEventListener('input', refresh);
+  function refresh() {
+    submit.disabled = !image || description.value.trim().length === 0;
+  }
+
+  submit.addEventListener('click', async () => {
+    submit.disabled = true;
+    compare.loading = true;
+    statusEl.textContent = '';
+
+    try {
+      const response = await fetch(ENDPOINT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          image,
+          description: description.value,
+          industry: industrySelect.value
+        })
+      });
+
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload?.error?.message || `Request failed (${response.status})`);
+
+      compare.after = payload.after;
+      compare.position = 50;
+    } catch (error) {
+      statusEl.textContent = error.message;
+    } finally {
+      compare.loading = false;
+      refresh();
+    }
+  });
+
+  // 3. The element reports position changes like any other form control, so
+  //    analytics hooks are ordinary event listeners.
+  compare.addEventListener('change', (event) => {
+    console.debug('compare position', Math.round(event.detail.position));
+  });
+</script>
+</body>
+</html>

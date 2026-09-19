@@ -69,19 +69,13 @@ console.log('assessmentRoutes OK');
 const leadRoutes = require('./src/routes/leadRoutes');
 console.log('leadRoutes OK');
 const estimateRoutes = require('./src/routes/estimateRoutes');
-console.log('estimateRoutes OK');
-const nexusRoutes = require('./src/routes/nexusRoutes');
-console.log('nexusRoutes OK');
-const weatherRoutes = require('./src/routes/weatherRoutes');
-console.log('weatherRoutes OK');
-console.log('Routes required');
+const renderRoutes = require('./src/routes/renderRoutes');
+const radarRoutes = require('./src/routes/radarRoutes');
 
 // Middleware
-console.log('About to require middleware...');
 const { authMiddleware } = require('./src/middleware/auth');
 const { errorHandler } = require('./src/middleware/errorHandler');
-const { logger } = require('./src/utils/logger');
-console.log('Middleware required');
+const logger = require('./src/utils/logger');
 
 const app = express();
 console.log('Express app created');
@@ -145,33 +139,13 @@ app.get('/health', async (req, res) => {
   const healthStatus = {
     status: 'OK',
     timestamp: new Date().toISOString(),
-    version: '1.0.0',
-    database: 'postgresql',
-    uptime: process.uptime(),
-    integrations: {}
-  };
-
-  // Check Nexus Mind status
-  if (NexusMindIntegration) {
-    try {
-      const nexusStatus = NexusMindIntegration.getStatus();
-      healthStatus.integrations.nexus_mind = nexusStatus;
-    } catch (e) {
-      healthStatus.integrations.nexus_mind = { error: e.message };
-    }
-  }
-
-  // Check NOAA Weather Service status
-  if (NOAAWeatherService) {
-    try {
-      const weatherStatus = NOAAWeatherService.getStatus();
-      healthStatus.integrations.noaa_weather = weatherStatus;
-    } catch (e) {
-      healthStatus.integrations.noaa_weather = { error: e.message };
-    }
-  }
-
-  res.status(200).json(healthStatus);
+    version: process.env.npm_package_version || '1.0.0',
+    // The Knex client object is circular (it holds its own pool and timers),
+    // so serialising it made the health check itself a 500 - the one endpoint
+    // that must never fail. Report the dialect name instead.
+    database: db.client?.config?.client || 'unknown',
+    uptime: process.uptime()
+  });
 });
 
 console.log('Setting up API routes...');
@@ -182,8 +156,8 @@ app.use('/api/properties', propertyRoutes);
 app.use('/api/assessments', assessmentRoutes);
 app.use('/api/leads', leadRoutes);
 app.use('/api/estimates', estimateRoutes);
-app.use('/api/nexus', nexusRoutes);
-app.use('/api/weather', weatherRoutes);
+app.use('/api/renders', renderRoutes);
+app.use('/api/radar', radarRoutes);
 
 // Protected routes (require authentication)
 app.use('/api/private', authMiddleware, (req, res) => {

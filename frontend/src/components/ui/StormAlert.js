@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ExclamationTriangleIcon, XMarkIcon } from '@heroicons/react/outline';
+import { ExclamationTriangleIcon, XMarkIcon } from '@heroicons/react/24/outline';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const StormAlert = () => {

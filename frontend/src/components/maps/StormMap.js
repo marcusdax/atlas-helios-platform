@@ -101,7 +101,8 @@ const StormMap = () => {
     }).addTo(map);
 
     // Add storm impact zone
-    const impactZone = L.circle([32.7767, -96.7970], {
+    // Added to the map below; the handle itself is not needed afterwards.
+    L.circle([32.7767, -96.7970], {
       radius: 5000,
       color: '#dc2626',
       weight: 2,
