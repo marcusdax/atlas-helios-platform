@@ -1,5 +1,6 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { useWebSocket } from './WebSocketContext';
+import { atlasAPI } from '../services/api';
 
 const PropertyContext = createContext();
 
@@ -17,6 +18,8 @@ export const PropertyProvider = ({ children }) => {
   const [assessments, setAssessments] = useState([]);
   const [leads, setLeads] = useState([]);
   const [estimates, setEstimates] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
   const [selectedProperty, setSelectedProperty] = useState(null);
   const [propertyFilters, setPropertyFilters] = useState({
     city: '',
@@ -26,9 +29,9 @@ export const PropertyProvider = ({ children }) => {
     searchQuery: ''
   });
 
+  // WebSocket event handlers
   useEffect(() => {
     if (socket && isConnected) {
-      // Property assessment events
       socket.on('property_assessment_started', (data) => {
         setAssessments(prev => [data, ...prev]);
       });
@@ -53,7 +56,6 @@ export const PropertyProvider = ({ children }) => {
         );
       });
 
-      // Cleanup
       return () => {
         socket.off('property_assessment_started');
         socket.off('property_assessment_complete');
@@ -68,83 +70,266 @@ export const PropertyProvider = ({ children }) => {
     initializePropertyData();
   }, []);
 
+  // ==================== API FUNCTIONS ====================
+
   const initializePropertyData = async () => {
+    setLoading(true);
+    setError(null);
     try {
-      // Mock data for demo
-      const mockProperties = [
-        {
-          id: 'prop_001',
-          address: '1247 Oak Ridge Dr',
-          city: 'Dallas',
-          state: 'TX',
-          zipCode: '75201',
-          latitude: 32.7767,
-          longitude: -96.7970,
-          propertyType: 'residential',
-          yearBuilt: 1998,
-          squareFootage: 2200,
-          roofType: 'architectural_shingles',
-          estimatedValue: 350000,
-          currentRiskLevel: 'high',
-          lastAssessmentScore: 94,
-          lastAssessmentDate: new Date(Date.now() - 15 * 60 * 1000),
-          assessmentStatus: 'completed'
-        },
-        {
-          id: 'prop_002',
-          address: '3856 Maple Ave',
-          city: 'Dallas',
-          state: 'TX',
-          zipCode: '75202',
-          latitude: 32.7831,
-          longitude: -96.8067,
-          propertyType: 'residential',
-          yearBuilt: 2005,
-          squareFootage: 1800,
-          roofType: 'metal',
-          estimatedValue: 280000,
-          currentRiskLevel: 'medium',
-          lastAssessmentScore: 76,
-          lastAssessmentDate: new Date(Date.now() - 2 * 60 * 60 * 1000),
-          assessmentStatus: 'completed'
-        }
-      ];
+      // Load all data in parallel
+      const [propertiesRes, assessmentsRes, leadsRes, estimatesRes] = await Promise.allSettled([
+        atlasAPI.properties.getAll({ limit: 100 }),
+        atlasAPI.assessments.getAll({ limit: 100 }),
+        atlasAPI.leads.getAll({ limit: 100 }),
+        atlasAPI.estimates.getAll({ limit: 100 }),
+      ]);
 
-      setProperties(mockProperties);
-
-      const mockLeads = [
-        {
-          id: 'lead_001',
-          propertyId: 'prop_001',
-          propertyAddress: '1247 Oak Ridge Dr, Dallas, TX',
-          damageProbabilityScore: 94,
-          leadStatus: 'new',
-          contactName: 'John Smith',
-          contactEmail: 'john.smith@email.com',
-          estimatedValue: 45000,
-          createdAt: new Date(Date.now() - 30 * 60 * 1000)
-        },
-        {
-          id: 'lead_002',
-          propertyId: 'prop_002',
-          propertyAddress: '3856 Maple Ave, Dallas, TX',
-          damageProbabilityScore: 76,
-          leadStatus: 'contacted',
-          contactName: 'Jane Doe',
-          contactEmail: 'jane.doe@email.com',
-          estimatedValue: 32000,
-          createdAt: new Date(Date.now() - 60 * 60 * 1000)
-        }
-      ];
-
-      setLeads(mockLeads);
-
-    } catch (error) {
-      console.error('Failed to initialize property data:', error);
+      if (propertiesRes.status === 'fulfilled') {
+        setProperties(propertiesRes.value.data.data || []);
+      }
+      if (assessmentsRes.status === 'fulfilled') {
+        setAssessments(assessmentsRes.value.data.data || []);
+      }
+      if (leadsRes.status === 'fulfilled') {
+        setLeads(leadsRes.value.data.data || []);
+      }
+      if (estimatesRes.status === 'fulfilled') {
+        setEstimates(estimatesRes.value.data.data || []);
+      }
+    } catch (err) {
+      console.error('Failed to initialize property data:', err);
+      setError(err.message);
+    } finally {
+      setLoading(false);
     }
   };
 
-  // Helper functions
+  // Properties API
+  const fetchProperties = useCallback(async (params = {}) => {
+    setLoading(true);
+    try {
+      const res = await atlasAPI.properties.getAll(params);
+      setProperties(res.data.data || []);
+      return res.data;
+    } catch (err) {
+      setError(err.message);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const fetchPropertyById = useCallback(async (id) => {
+    try {
+      const res = await atlasAPI.properties.getById(id);
+      return res.data.data;
+    } catch (err) {
+      setError(err.message);
+      throw err;
+    }
+  }, []);
+
+  const createProperty = useCallback(async (data) => {
+    try {
+      const res = await atlasAPI.properties.create(data);
+      setProperties(prev => [res.data.data, ...prev]);
+      return res.data.data;
+    } catch (err) {
+      setError(err.message);
+      throw err;
+    }
+  }, []);
+
+  const updatePropertyData = useCallback(async (id, data) => {
+    try {
+      const res = await atlasAPI.properties.update(id, data);
+      setProperties(prev =>
+        prev.map(property =>
+          property.id === id ? { ...property, ...res.data.data } : property
+        )
+      );
+      return res.data.data;
+    } catch (err) {
+      setError(err.message);
+      throw err;
+    }
+  }, []);
+
+  const deleteProperty = useCallback(async (id) => {
+    try {
+      await atlasAPI.properties.delete(id);
+      setProperties(prev => prev.filter(property => property.id !== id));
+      return true;
+    } catch (err) {
+      setError(err.message);
+      throw err;
+    }
+  }, []);
+
+  // Assessments API
+  const fetchAssessments = useCallback(async (params = {}) => {
+    try {
+      const res = await atlasAPI.assessments.getAll(params);
+      setAssessments(res.data.data || []);
+      return res.data;
+    } catch (err) {
+      setError(err.message);
+      throw err;
+    }
+  }, []);
+
+  const createAssessment = useCallback(async (data) => {
+    try {
+      const res = await atlasAPI.assessments.create(data);
+      setAssessments(prev => [res.data.data, ...prev]);
+      return res.data.data;
+    } catch (err) {
+      setError(err.message);
+      throw err;
+    }
+  }, []);
+
+  const updateAssessmentData = useCallback(async (id, data) => {
+    try {
+      const res = await atlasAPI.assessments.update(id, data);
+      setAssessments(prev =>
+        prev.map(assessment =>
+          assessment.id === id ? { ...assessment, ...res.data.data } : assessment
+        )
+      );
+      return res.data.data;
+    } catch (err) {
+      setError(err.message);
+      throw err;
+    }
+  }, []);
+
+  const deleteAssessment = useCallback(async (id) => {
+    try {
+      await atlasAPI.assessments.delete(id);
+      setAssessments(prev => prev.filter(a => a.id !== id));
+      return true;
+    } catch (err) {
+      setError(err.message);
+      throw err;
+    }
+  }, []);
+
+  // Leads API
+  const fetchLeads = useCallback(async (params = {}) => {
+    try {
+      const res = await atlasAPI.leads.getAll(params);
+      setLeads(res.data.data || []);
+      return res.data;
+    } catch (err) {
+      setError(err.message);
+      throw err;
+    }
+  }, []);
+
+  const createLead = useCallback(async (data) => {
+    try {
+      const res = await atlasAPI.leads.create(data);
+      setLeads(prev => [res.data.data, ...prev]);
+      return res.data.data;
+    } catch (err) {
+      setError(err.message);
+      throw err;
+    }
+  }, []);
+
+  const updateLeadData = useCallback(async (id, data) => {
+    try {
+      const res = await atlasAPI.leads.update(id, data);
+      setLeads(prev =>
+        prev.map(lead =>
+          lead.id === id ? { ...lead, ...res.data.data } : lead
+        )
+      );
+      return res.data.data;
+    } catch (err) {
+      setError(err.message);
+      throw err;
+    }
+  }, []);
+
+  const deleteLead = useCallback(async (id) => {
+    try {
+      await atlasAPI.leads.delete(id);
+      setLeads(prev => prev.filter(l => l.id !== id));
+      return true;
+    } catch (err) {
+      setError(err.message);
+      throw err;
+    }
+  }, []);
+
+  const updateLeadStatus = useCallback(async (id, status, notes) => {
+    try {
+      const res = await atlasAPI.leads.updateStatus(id, { status, notes });
+      setLeads(prev =>
+        prev.map(lead =>
+          lead.id === id ? { ...lead, ...res.data.data } : lead
+        )
+      );
+      return res.data.data;
+    } catch (err) {
+      setError(err.message);
+      throw err;
+    }
+  }, []);
+
+  // Estimates API
+  const fetchEstimates = useCallback(async (params = {}) => {
+    try {
+      const res = await atlasAPI.estimates.getAll(params);
+      setEstimates(res.data.data || []);
+      return res.data;
+    } catch (err) {
+      setError(err.message);
+      throw err;
+    }
+  }, []);
+
+  const createEstimate = useCallback(async (data) => {
+    try {
+      const res = await atlasAPI.estimates.create(data);
+      setEstimates(prev => [res.data.data, ...prev]);
+      return res.data.data;
+    } catch (err) {
+      setError(err.message);
+      throw err;
+    }
+  }, []);
+
+  const updateEstimateData = useCallback(async (id, data) => {
+    try {
+      const res = await atlasAPI.estimates.update(id, data);
+      setEstimates(prev =>
+        prev.map(est =>
+          est.id === id ? { ...est, ...res.data.data } : est
+        )
+      );
+      return res.data.data;
+    } catch (err) {
+      setError(err.message);
+      throw err;
+    }
+  }, []);
+
+  const deleteEstimate = useCallback(async (id) => {
+    try {
+      await atlasAPI.estimates.delete(id);
+      setEstimates(prev => prev.filter(e => e.id !== id));
+      return true;
+    } catch (err) {
+      setError(err.message);
+      throw err;
+    }
+  }, []);
+
+  // ==================== HELPER FUNCTIONS ====================
+
   const getPropertyById = (id) => {
     return properties.find(property => property.id === id);
   };
@@ -194,20 +379,18 @@ export const PropertyProvider = ({ children }) => {
   const searchProperties = (query, filters = {}) => {
     let filteredProperties = [...properties];
 
-    // Apply search query
     if (query) {
       const searchTerm = query.toLowerCase();
       filteredProperties = filteredProperties.filter(property =>
-        property.address.toLowerCase().includes(searchTerm) ||
-        property.city.toLowerCase().includes(searchTerm) ||
-        property.zipCode.includes(searchTerm)
+        property.address?.toLowerCase().includes(searchTerm) ||
+        property.city?.toLowerCase().includes(searchTerm) ||
+        property.zipCode?.includes(searchTerm)
       );
     }
 
-    // Apply filters
     if (filters.city) {
       filteredProperties = filteredProperties.filter(property =>
-        property.city.toLowerCase().includes(filters.city.toLowerCase())
+        property.city?.toLowerCase().includes(filters.city.toLowerCase())
       );
     }
 
@@ -232,38 +415,6 @@ export const PropertyProvider = ({ children }) => {
     return filteredProperties;
   };
 
-  const updateProperty = (propertyId, updates) => {
-    setProperties(prev =>
-      prev.map(property =>
-        property.id === propertyId ? { ...property, ...updates } : property
-      )
-    );
-  };
-
-  const addAssessment = (assessment) => {
-    setAssessments(prev => [assessment, ...prev]);
-  };
-
-  const updateAssessment = (assessmentId, updates) => {
-    setAssessments(prev =>
-      prev.map(assessment =>
-        assessment.id === assessmentId ? { ...assessment, ...updates } : assessment
-      )
-    );
-  };
-
-  const addLead = (lead) => {
-    setLeads(prev => [lead, ...prev]);
-  };
-
-  const updateLead = (leadId, updates) => {
-    setLeads(prev =>
-      prev.map(lead =>
-        lead.id === leadId ? { ...lead, ...updates } : lead
-      )
-    );
-  };
-
   const getAssessmentsByProperty = (propertyId) => {
     return assessments
       .filter(assessment => assessment.propertyId === propertyId)
@@ -277,17 +428,16 @@ export const PropertyProvider = ({ children }) => {
   };
 
   const generatePortfolioReport = async (companyId, criteria = {}) => {
-    // Mock portfolio report generation
     const companyProperties = properties.filter(p => !companyId || p.companyId === companyId);
     
-    const report = {
+    return {
       generatedAt: new Date(),
       companyId,
       criteria,
       summary: {
         totalProperties: companyProperties.length,
         highRiskCount: companyProperties.filter(p => p.currentRiskLevel === 'high').length,
-        averageScore: companyProperties.reduce((sum, p) => sum + (p.lastAssessmentScore || 0), 0) / companyProperties.length,
+        averageScore: companyProperties.reduce((sum, p) => sum + (p.lastAssessmentScore || 0), 0) / companyProperties.length || 0,
         totalEstimatedValue: companyProperties.reduce((sum, p) => sum + (p.estimatedValue || 0), 0)
       },
       recommendations: [
@@ -296,8 +446,6 @@ export const PropertyProvider = ({ children }) => {
         'Review insurance coverage for affected areas'
       ]
     };
-
-    return report;
   };
 
   const value = {
@@ -306,6 +454,8 @@ export const PropertyProvider = ({ children }) => {
     assessments,
     leads,
     estimates,
+    loading,
+    error,
     selectedProperty,
     propertyFilters,
     
@@ -320,20 +470,42 @@ export const PropertyProvider = ({ children }) => {
     getAssessmentsByProperty,
     getLeadsByProperty,
     
-    // Actions
+    // API Actions - Properties
+    fetchProperties,
+    fetchPropertyById,
+    createProperty,
+    updatePropertyData,
+    deleteProperty,
+    
+    // API Actions - Assessments
+    fetchAssessments,
+    createAssessment,
+    updateAssessmentData,
+    deleteAssessment,
+    
+    // API Actions - Leads
+    fetchLeads,
+    createLead,
+    updateLeadData,
+    deleteLead,
+    updateLeadStatus,
+    
+    // API Actions - Estimates
+    fetchEstimates,
+    createEstimate,
+    updateEstimateData,
+    deleteEstimate,
+    
+    // Other Actions
     searchProperties,
-    updateProperty,
-    addAssessment,
-    updateAssessment,
-    addLead,
-    updateLead,
     generatePortfolioReport,
+    initializePropertyData,
     setSelectedProperty,
     setPropertyFilters,
     setProperties,
     setAssessments,
     setLeads,
-    setEstimates
+    setEstimates,
   };
 
   return (

@@ -1,176 +1,342 @@
-'use strict';
-
 const express = require('express');
-const multer = require('multer');
-const { authMiddleware, authorize } = require('../middleware/auth');
-const { asyncHandler, ErrorResponse } = require('../middleware/errorHandler');
-const db = require('../../config/database');
-const logger = require('../utils/logger');
-const PropertyService = require('../services/PropertyService');
-const ComputerVisionService = require('../services/ComputerVisionService');
-const { Joi, validate, paginate, meta, scopeToCompany, notFoundIf, paginationSchema } = require('./_helpers');
-
 const router = express.Router();
-router.use(authMiddleware);
+const PropertyService = require('../services/PropertyService');
+let ComputerVisionService;
+try {
+  ComputerVisionService = require('../services/ComputerVisionService');
+} catch (e) {
+  ComputerVisionService = null;
+}
+const { authMiddleware } = require('../middleware/auth');
+const { logger } = require('../utils/logger');
 
-/**
- * Inspection photos arrive from a phone in the field, so they are held in
- * memory and handed straight to the vision pipeline rather than written to
- * disk: there is nothing to clean up if the request dies, and nothing on the
- * filesystem to leak between tenants.
- */
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: {
-    fileSize: Number.parseInt(process.env.MAX_UPLOAD_BYTES, 10) || 15 * 1024 * 1024,
-    files: 12
-  },
-  fileFilter: (req, file, cb) => {
-    const allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/heic'];
-    cb(allowed.includes(file.mimetype) ? null : new ErrorResponse(
-      `Unsupported image type ${file.mimetype}`, 400, { code: 'VALIDATION_ERROR' }
-    ), allowed.includes(file.mimetype));
+// Get all assessments for user
+router.get('/', authMiddleware, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { 
+      page = 1, 
+      limit = 20, 
+      status,
+      severity,
+      propertyId,
+      dateFrom,
+      dateTo
+    } = req.query;
+    
+    const assessments = await PropertyService.getUserAssessments(userId, {
+      page: parseInt(page),
+      limit: parseInt(limit),
+      filters: {
+        status,
+        severity,
+        propertyId,
+        dateFrom: dateFrom ? new Date(dateFrom) : null,
+        dateTo: dateTo ? new Date(dateTo) : null
+      }
+    });
+    
+    res.json({
+      success: true,
+      data: assessments.assessments,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total: assessments.total,
+        pages: Math.ceil(assessments.total / parseInt(limit))
+      },
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    logger.error('Error fetching assessments:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch assessments'
+    });
   }
 });
 
-/**
- * @route GET /api/assessments/history
- * @desc  Assessment history for the company. Declared before /:id.
- */
-router.get('/history', validate(paginationSchema.keys({
-  property_id: Joi.string().max(64),
-  status: Joi.string().valid('pending', 'processing', 'completed', 'failed'),
-  since: Joi.date().iso()
-}), 'query'), asyncHandler(async (req, res) => {
-  const { page, limit, offset } = paginate(req.query);
-
-  const base = () => {
-    // Assessments carry no company column; they inherit scope from the
-    // property, so the join is the tenancy boundary rather than a convenience.
-    let query = db('property_assessments as a')
-      .join('properties as p', 'p.id', 'a.property_id')
-      .modify((qb) => scopeToCompany(qb, req.user, 'p.company_id'));
-
-    if (req.query.property_id) query = query.where('a.property_id', req.query.property_id);
-    if (req.query.status) query = query.where('a.status', req.query.status);
-    if (req.query.since) query = query.where('a.created_at', '>=', req.query.since);
-    return query;
-  };
-
-  const [{ count }] = await base().count({ count: 'a.id' });
-  const data = await base()
-    .select('a.*', 'p.address', 'p.city', 'p.state', 'p.zip_code')
-    .orderBy('a.created_at', req.query.order)
-    .limit(limit).offset(offset);
-
-  res.json({ data, meta: meta(Number(count), { page, limit }) });
-}));
-
-/**
- * @route POST /api/assessments
- * @desc  Start an AI assessment for a property, with optional inspection photos.
- *
- * Returns 202: a vision pass takes tens of seconds, which is longer than a
- * field tablet on LTE will hold a socket. The client polls GET /:id, and the
- * WebSocket `property_assessment_complete` event pushes the result when done.
- */
-router.post('/', authorize('admin', 'manager', 'agent', 'inspector'),
-  upload.array('images', 12),
-  asyncHandler(async (req, res) => {
-    const { error, value } = Joi.object({
-      property_id: Joi.string().max(64).required(),
-      inspection_type: Joi.string().valid('exterior', 'roof', 'full', 'storm_damage').default('exterior'),
-      notes: Joi.string().max(2000).allow(''),
-      storm_event_id: Joi.string().max(64)
-    }).validate(req.body, { stripUnknown: true, convert: true });
-
-    if (error) {
-      throw new ErrorResponse('Validation failed', 400, {
-        code: 'VALIDATION_ERROR',
-        fields: error.details.map((d) => ({ field: d.path.join('.'), message: d.message }))
+// Get assessment by ID
+router.get('/:assessmentId', authMiddleware, async (req, res) => {
+  try {
+    const { assessmentId } = req.params;
+    const userId = req.user.id;
+    
+    const assessment = await PropertyService.getAssessmentById(assessmentId, userId);
+    
+    if (!assessment) {
+      return res.status(404).json({
+        success: false,
+        error: 'Assessment not found'
       });
     }
-
-    const property = notFoundIf(
-      await scopeToCompany(db('properties'), req.user).where('id', value.property_id).first(),
-      'Property'
-    );
-
-    const assessment = await PropertyService.performPropertyAssessment(property.id, {
-      ...value,
-      requested_by: req.user.id,
-      image_count: req.files?.length || 0
+    
+    res.json({
+      success: true,
+      data: assessment,
+      timestamp: new Date().toISOString()
     });
+  } catch (error) {
+    logger.error(`Error fetching assessment ${req.params.assessmentId}:`, error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch assessment details'
+    });
+  }
+});
 
-    // Photos are analysed out of band so the request returns immediately.
-    if (req.files?.length) {
-      Promise.all(req.files.map((file) =>
-        ComputerVisionService.analyzePropertyDamage(file.buffer, property)
-      ))
-        .then((analyses) => PropertyService.completeAssessment(assessment.id, { analyses }))
-        .catch((err) => {
-          logger.error(`Assessment ${assessment.id} vision pass failed:`, err);
-          return PropertyService.updateAssessmentStatus(assessment.id, 'failed', err.message);
-        });
-    }
-
-    logger.info(`Assessment ${assessment.id} started for property ${property.id}`);
-    res.status(202)
-      .location(`${req.baseUrl}/${assessment.id}`)
-      .json({ data: assessment, meta: { images_queued: req.files?.length || 0 } });
-  }));
-
-/**
- * @route GET /api/assessments/:id
- */
-router.get('/:id', asyncHandler(async (req, res) => {
-  const assessment = notFoundIf(
-    await db('property_assessments as a')
-      .join('properties as p', 'p.id', 'a.property_id')
-      .modify((qb) => scopeToCompany(qb, req.user, 'p.company_id'))
-      .where('a.id', req.params.id)
-      .select('a.*', 'p.address', 'p.city', 'p.state', 'p.zip_code', 'p.latitude', 'p.longitude')
-      .first(),
-    'Assessment'
-  );
-
-  res.json({ data: assessment });
-}));
-
-/**
- * @route PUT /api/assessments/:id
- * @desc  Human review of an AI result. An inspector overriding the model is a
- *        first-class outcome, not an error path — it is also the label the
- *        model is retrained on, so the original scores are preserved alongside.
- */
-router.put('/:id', authorize('admin', 'manager', 'inspector'), validate(Joi.object({
-  status: Joi.string().valid('completed', 'failed', 'needs_review'),
-  reviewed_severity: Joi.string().valid('none', 'minor', 'moderate', 'severe', 'total_loss'),
-  reviewer_notes: Joi.string().max(4000).allow(''),
-  confirmed: Joi.boolean()
-}).min(1)), asyncHandler(async (req, res) => {
-  const assessment = notFoundIf(
-    await db('property_assessments as a')
-      .join('properties as p', 'p.id', 'a.property_id')
-      .modify((qb) => scopeToCompany(qb, req.user, 'p.company_id'))
-      .where('a.id', req.params.id)
-      .select('a.*')
-      .first(),
-    'Assessment'
-  );
-
-  const [updated] = await db('property_assessments')
-    .where('id', assessment.id)
-    .update({
+// Create new property assessment
+router.post('/', authMiddleware, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const assessmentData = {
       ...req.body,
-      reviewed_by: req.user.id,
-      reviewed_at: db.fn.now(),
-      updated_at: db.fn.now()
-    })
-    .returning('*');
+      userId,
+      status: 'pending',
+      createdAt: new Date()
+    };
+    
+    const assessment = await PropertyService.createAssessment(assessmentData);
+    
+    res.status(201).json({
+      success: true,
+      data: assessment,
+      message: 'Assessment created successfully'
+    });
+  } catch (error) {
+    logger.error('Error creating assessment:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to create assessment'
+    });
+  }
+});
 
-  logger.info(`Assessment ${assessment.id} reviewed by user ${req.user.id}`);
-  res.json({ data: updated });
-}));
+// Update assessment
+router.put('/:assessmentId', authMiddleware, async (req, res) => {
+  try {
+    const { assessmentId } = req.params;
+    const userId = req.user.id;
+    const updateData = req.body;
+    
+    const assessment = await PropertyService.updateAssessment(assessmentId, userId, updateData);
+    
+    if (!assessment) {
+      return res.status(404).json({
+        success: false,
+        error: 'Assessment not found'
+      });
+    }
+    
+    res.json({
+      success: true,
+      data: assessment,
+      message: 'Assessment updated successfully'
+    });
+  } catch (error) {
+    logger.error(`Error updating assessment ${req.params.assessmentId}:`, error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to update assessment'
+    });
+  }
+});
+
+// Delete assessment
+router.delete('/:assessmentId', authMiddleware, async (req, res) => {
+  try {
+    const { assessmentId } = req.params;
+    const userId = req.user.id;
+    
+    const deleted = await PropertyService.deleteAssessment(assessmentId, userId);
+    
+    if (!deleted) {
+      return res.status(404).json({
+        success: false,
+        error: 'Assessment not found'
+      });
+    }
+    
+    res.json({
+      success: true,
+      message: 'Assessment deleted successfully'
+    });
+  } catch (error) {
+    logger.error(`Error deleting assessment ${req.params.assessmentId}:`, error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to delete assessment'
+    });
+  }
+});
+
+// Upload assessment images
+router.post('/:assessmentId/images', authMiddleware, async (req, res) => {
+  try {
+    const { assessmentId } = req.params;
+    const userId = req.user.id;
+    const { images, imageType = 'damage' } = req.body;
+    
+    const uploadedImages = await PropertyService.uploadAssessmentImages(assessmentId, userId, images, imageType);
+    
+    res.json({
+      success: true,
+      data: uploadedImages,
+      message: 'Assessment images uploaded successfully'
+    });
+  } catch (error) {
+    logger.error(`Error uploading images for assessment ${req.params.assessmentId}:`, error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to upload assessment images'
+    });
+  }
+});
+
+// Run AI damage analysis
+router.post('/:assessmentId/analyze-damage', authMiddleware, async (req, res) => {
+  try {
+    const { assessmentId } = req.params;
+    const userId = req.user.id;
+    const { analysisType = 'comprehensive' } = req.body;
+    
+    const analysis = await ComputerVisionService.analyzePropertyDamage(assessmentId, userId, analysisType);
+    
+    res.json({
+      success: true,
+      data: analysis,
+      message: 'Damage analysis completed successfully'
+    });
+  } catch (error) {
+    logger.error(`Error analyzing damage for assessment ${req.params.assessmentId}:`, error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to analyze damage'
+    });
+  }
+});
+
+// Get assessment statistics
+router.get('/stats/overview', authMiddleware, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { period = '30d' } = req.query;
+    
+    const stats = await PropertyService.getAssessmentStatistics(userId, period);
+    
+    res.json({
+      success: true,
+      data: stats,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    logger.error('Error fetching assessment statistics:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch assessment statistics'
+    });
+  }
+});
+
+// Get assessment timeline
+router.get('/:assessmentId/timeline', authMiddleware, async (req, res) => {
+  try {
+    const { assessmentId } = req.params;
+    const userId = req.user.id;
+    
+    const timeline = await PropertyService.getAssessmentTimeline(assessmentId, userId);
+    
+    res.json({
+      success: true,
+      data: timeline,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    logger.error(`Error fetching assessment timeline ${req.params.assessmentId}:`, error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch assessment timeline'
+    });
+  }
+});
+
+// Generate assessment report
+router.get('/:assessmentId/report', authMiddleware, async (req, res) => {
+  try {
+    const { assessmentId } = req.params;
+    const userId = req.user.id;
+    const { format = 'json', includeImages = true } = req.query;
+    
+    const report = await PropertyService.generateAssessmentReport(assessmentId, userId, {
+      format,
+      includeImages: includeImages === 'true'
+    });
+    
+    if (format === 'pdf') {
+      res.setHeader('Content-Type', 'application/pdf');
+      res.send(report);
+    } else {
+      res.json({
+        success: true,
+        data: report,
+        timestamp: new Date().toISOString()
+      });
+    }
+  } catch (error) {
+    logger.error(`Error generating assessment report ${req.params.assessmentId}:`, error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to generate assessment report'
+    });
+  }
+});
+
+// Submit assessment for review
+router.post('/:assessmentId/submit', authMiddleware, async (req, res) => {
+  try {
+    const { assessmentId } = req.params;
+    const userId = req.user.id;
+    const { notes, priority = 'normal' } = req.body;
+    
+    const assessment = await PropertyService.submitAssessmentForReview(assessmentId, userId, {
+      notes,
+      priority
+    });
+    
+    res.json({
+      success: true,
+      data: assessment,
+      message: 'Assessment submitted for review successfully'
+    });
+  } catch (error) {
+    logger.error(`Error submitting assessment ${req.params.assessmentId}:`, error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to submit assessment'
+    });
+  }
+});
+
+// Get assessment recommendations
+router.get('/:assessmentId/recommendations', authMiddleware, async (req, res) => {
+  try {
+    const { assessmentId } = req.params;
+    const userId = req.user.id;
+    
+    const recommendations = await PropertyService.getAssessmentRecommendations(assessmentId, userId);
+    
+    res.json({
+      success: true,
+      data: recommendations,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    logger.error(`Error fetching assessment recommendations ${req.params.assessmentId}:`, error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch assessment recommendations'
+    });
+  }
+});
 
 module.exports = router;

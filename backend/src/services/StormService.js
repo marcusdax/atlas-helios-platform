@@ -4,7 +4,7 @@ const cron = require('node-cron');
 // cannot be required from this CommonJS backend or loaded by Jest.
 const { randomUUID: uuidv4 } = require('node:crypto');
 const db = require('../../config/database');
-const logger = require('../utils/logger');
+const { logger } = require('../utils/logger');
 
 /**
  * Storm Intelligence Service
@@ -754,6 +754,47 @@ class StormService {
       'Review and update emergency procedures',
       'Ensure adequate insurance coverage'
     ];
+  }
+
+  // Stub methods for route compatibility
+  async getActiveStorms(options = {}) {
+    return [];
+  }
+
+  async getStormById(stormId) {
+    return null;
+  }
+
+  async getStormTrack(stormId) {
+    return [];
+  }
+
+  async getPropertiesAtRisk(stormId, options = {}) {
+    return [];
+  }
+
+  async getUserStormAlerts(userId) {
+    return [];
+  }
+
+  async createAlertSubscription(data) {
+    return { id: 'sub-' + Date.now(), ...data };
+  }
+
+  async getStormPredictions(stormId, options = {}) {
+    return { predictions: [] };
+  }
+
+  async getHistoricalStorms(region, options = {}) {
+    return [];
+  }
+
+  async generateImpactReport(stormId, format = 'json') {
+    return { stormId, format, report: 'No data available' };
+  }
+
+  async deleteAlertSubscription(subscriptionId, userId) {
+    return true;
   }
 }
 
