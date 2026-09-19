@@ -1,221 +1,390 @@
-'use strict';
-
 const express = require('express');
-const axios = require('axios');
-const { authMiddleware, authorize } = require('../middleware/auth');
-const { asyncHandler, ErrorResponse } = require('../middleware/errorHandler');
-const db = require('../../config/database');
-const logger = require('../utils/logger');
-const {
-  newId, Joi, validate, paginate, meta, scopeToCompany, notFoundIf, paginationSchema } = require('./_helpers');
-
 const router = express.Router();
-router.use(authMiddleware);
+const PropertyService = require('../services/PropertyService');
+const { authMiddleware } = require('../middleware/auth');
+const { logger } = require('../utils/logger');
 
-const STATUSES = ['new', 'contacted', 'qualified', 'quoted', 'won', 'lost', 'closed'];
-
-/**
- * Lead score, computed here rather than stored, so a change to the weighting
- * re-scores the whole pipeline instead of only leads created after the change.
- *
- * The weights encode what actually predicts a signed job in restoration: fresh
- * storm damage first, because that is when the homeowner is motivated and the
- * insurer is paying; property value second; and recency third, because a lead
- * worked on day one converts several times better than the same lead worked on
- * day ten.
- */
-function scoreLead(lead) {
-  const damage = Math.min(100, lead.damage_probability || 0);
-  const value = Math.min(100, ((lead.estimated_value || 0) / 750000) * 100);
-  const ageDays = lead.created_at
-    ? (Date.now() - new Date(lead.created_at).getTime()) / 86400000
-    : 0;
-  const freshness = Math.max(0, 100 - ageDays * 8);
-
-  const score = damage * 0.5 + value * 0.2 + freshness * 0.3;
-  return Math.round(Math.max(0, Math.min(100, score)));
-}
-
-const leadBody = Joi.object({
-  property_id: Joi.string().max(64).required(),
-  storm_event_id: Joi.string().max(64),
-  contact_name: Joi.string().max(160),
-  contact_phone: Joi.string().max(40),
-  contact_email: Joi.string().email().max(160),
-  source: Joi.string().valid('storm_alert', 'canvass', 'referral', 'inbound', 'campaign').default('storm_alert'),
-  status: Joi.string().valid(...STATUSES).default('new'),
-  assigned_to: Joi.string().max(64),
-  notes: Joi.string().max(4000).allow('')
+// Get all leads for user
+router.get('/', authMiddleware, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { 
+      page = 1, 
+      limit = 20, 
+      status,
+      priority,
+      source,
+      dateFrom,
+      dateTo
+    } = req.query;
+    
+    const leads = await PropertyService.getUserLeads(userId, {
+      page: parseInt(page),
+      limit: parseInt(limit),
+      filters: {
+        status,
+        priority,
+        source,
+        dateFrom: dateFrom ? new Date(dateFrom) : null,
+        dateTo: dateTo ? new Date(dateTo) : null
+      }
+    });
+    
+    res.json({
+      success: true,
+      data: leads.leads,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total: leads.total,
+        pages: Math.ceil(leads.total / parseInt(limit))
+      },
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    logger.error('Error fetching leads:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch leads'
+    });
+  }
 });
 
-/**
- * @route GET /api/leads
- */
-router.get('/', validate(paginationSchema.keys({
-  status: Joi.string().valid(...STATUSES),
-  assigned_to: Joi.string().max(64),
-  source: Joi.string().max(40),
-  min_score: Joi.number().min(0).max(100)
-}), 'query'), asyncHandler(async (req, res) => {
-  const { page, limit, offset } = paginate(req.query);
-
-  const base = () => {
-    let query = scopeToCompany(db('leads as l'), req.user, 'l.company_id')
-      .join('properties as p', 'p.id', 'l.property_id');
-    if (req.query.status) query = query.where('l.status', req.query.status);
-    if (req.query.assigned_to) query = query.where('l.assigned_to', req.query.assigned_to);
-    if (req.query.source) query = query.where('l.source', req.query.source);
-    return query;
-  };
-
-  const [{ count }] = await base().count({ count: 'l.id' });
-  const rows = await base()
-    .select('l.*', 'p.address', 'p.city', 'p.state', 'p.zip_code',
-      'p.estimated_value', 'p.damage_probability', 'p.latitude', 'p.longitude')
-    .orderBy('l.created_at', req.query.order)
-    .limit(limit).offset(offset);
-
-  const data = rows
-    .map((lead) => ({ ...lead, score: scoreLead(lead) }))
-    .filter((lead) => req.query.min_score === undefined || lead.score >= req.query.min_score)
-    .sort((a, b) => b.score - a.score);
-
-  res.json({ data, meta: meta(Number(count), { page, limit }) });
-}));
-
-/**
- * @route POST /api/leads
- */
-router.post('/', authorize('admin', 'manager', 'agent'), validate(leadBody), asyncHandler(async (req, res) => {
-  const property = notFoundIf(
-    await scopeToCompany(db('properties'), req.user).where('id', req.body.property_id).first(),
-    'Property'
-  );
-
-  // One open lead per property: a second one splits the call history and two
-  // reps end up knocking on the same door.
-  const open = await scopeToCompany(db('leads'), req.user)
-    .where('property_id', property.id)
-    .whereNotIn('status', ['won', 'lost', 'closed'])
-    .first();
-
-  if (open) return res.status(200).json({ data: open, meta: { created: false, reason: 'open_lead_exists' } });
-
-  const [lead] = await db('leads').insert({
-    id: newId(),
-    ...req.body,
-    company_id: req.user.company_id,
-    created_by: req.user.id
-  }).returning('*');
-
-  logger.info(`Lead ${lead.id} created for property ${property.id}`);
-  return res.status(201).json({ data: { ...lead, score: scoreLead({ ...lead, ...property }) }, meta: { created: true } });
-}));
-
-/**
- * @route PUT /api/leads/:id
- */
-router.put('/:id', authorize('admin', 'manager', 'agent'), validate(Joi.object({
-  status: Joi.string().valid(...STATUSES),
-  assigned_to: Joi.string().max(64).allow(null),
-  contact_name: Joi.string().max(160),
-  contact_phone: Joi.string().max(40),
-  contact_email: Joi.string().email().max(160),
-  notes: Joi.string().max(4000).allow('')
-}).min(1)), asyncHandler(async (req, res) => {
-  const lead = notFoundIf(
-    await scopeToCompany(db('leads'), req.user).where('id', req.params.id).first(),
-    'Lead'
-  );
-
-  const [updated] = await db('leads')
-    .where('id', lead.id)
-    .update({ ...req.body, updated_at: db.fn.now() })
-    .returning('*');
-
-  // Status transitions are the audit trail a commission dispute is settled
-  // from, so they are recorded rather than only overwritten.
-  if (req.body.status && req.body.status !== lead.status) {
-    await db('system_logs').insert({
-      level: 'info',
-      message: `Lead ${lead.id} ${lead.status} -> ${req.body.status}`,
-      context: JSON.stringify({ lead_id: lead.id, user_id: req.user.id, from: lead.status, to: req.body.status })
-    }).catch(() => {});
-  }
-
-  res.json({ data: updated });
-}));
-
-/**
- * @route POST /api/leads/export
- * @desc  Push selected leads to the configured CRM, or return CSV.
- */
-router.post('/export', authorize('admin', 'manager'), validate(Joi.object({
-  lead_ids: Joi.array().items(Joi.string().max(64)).min(1).max(500),
-  status: Joi.string().valid(...STATUSES),
-  format: Joi.string().valid('crm', 'csv').default('csv')
-}).or('lead_ids', 'status')), asyncHandler(async (req, res) => {
-  let query = scopeToCompany(db('leads as l'), req.user, 'l.company_id')
-    .join('properties as p', 'p.id', 'l.property_id');
-
-  if (req.body.lead_ids) query = query.whereIn('l.id', req.body.lead_ids);
-  if (req.body.status) query = query.where('l.status', req.body.status);
-
-  const leads = await query.select(
-    'l.id', 'l.status', 'l.source', 'l.contact_name', 'l.contact_phone', 'l.contact_email',
-    'l.created_at', 'p.address', 'p.city', 'p.state', 'p.zip_code', 'p.estimated_value', 'p.damage_probability'
-  );
-
-  if (leads.length === 0) throw new ErrorResponse('No leads matched the export criteria', 404, { code: 'NOT_FOUND' });
-
-  if (req.body.format === 'csv') {
-    const columns = Object.keys(leads[0]);
-    // Quote every field and double embedded quotes: an address with a comma is
-    // the normal case here, not an edge case.
-    const escape = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-    const csv = [columns.join(','), ...leads.map((r) => columns.map((c) => escape(r[c])).join(','))].join('\n');
-
-    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="leads-${Date.now()}.csv"`);
-    return res.send(csv);
-  }
-
-  if (process.env.CRM_INTEGRATION_ENABLED !== 'true' || !process.env.CRM_API_KEY) {
-    throw new ErrorResponse('CRM integration is not configured', 503, { code: 'CRM_NOT_CONFIGURED' });
-  }
-
+// Get lead by ID
+router.get('/:leadId', authMiddleware, async (req, res) => {
   try {
-    const response = await axios.post(
-      `${process.env.CRM_API_BASE_URL}/leads/bulk`,
-      { leads },
-      { headers: { Authorization: `Bearer ${process.env.CRM_API_KEY}` }, timeout: 20000 }
-    );
-    logger.info(`Exported ${leads.length} leads to CRM for company ${req.user.company_id}`);
-    return res.json({ data: { exported: leads.length, crm_reference: response.data?.batch_id || null } });
-  } catch (err) {
-    // Never surface the upstream body: it echoes the payload and can carry the
-    // bearer token back in an error envelope.
-    logger.error('CRM export failed:', err.message);
-    throw new ErrorResponse('CRM export failed', 502, { code: 'CRM_EXPORT_FAILED' });
+    const { leadId } = req.params;
+    const userId = req.user.id;
+    
+    const lead = await PropertyService.getLeadById(leadId, userId);
+    
+    if (!lead) {
+      return res.status(404).json({
+        success: false,
+        error: 'Lead not found'
+      });
+    }
+    
+    res.json({
+      success: true,
+      data: lead,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    logger.error(`Error fetching lead ${req.params.leadId}:`, error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch lead details'
+    });
   }
-}));
+});
 
-/**
- * @route GET /api/leads/:id
- */
-router.get('/:id', asyncHandler(async (req, res) => {
-  const lead = notFoundIf(
-    await scopeToCompany(db('leads as l'), req.user, 'l.company_id')
-      .join('properties as p', 'p.id', 'l.property_id')
-      .where('l.id', req.params.id)
-      .select('l.*', 'p.address', 'p.city', 'p.state', 'p.zip_code', 'p.estimated_value', 'p.damage_probability')
-      .first(),
-    'Lead'
-  );
+// Create new lead
+router.post('/', authMiddleware, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const leadData = {
+      ...req.body,
+      userId,
+      status: 'new',
+      createdAt: new Date()
+    };
+    
+    const lead = await PropertyService.createLead(leadData);
+    
+    res.status(201).json({
+      success: true,
+      data: lead,
+      message: 'Lead created successfully'
+    });
+  } catch (error) {
+    logger.error('Error creating lead:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to create lead'
+    });
+  }
+});
 
-  const estimates = await db('estimates').where('lead_id', lead.id).orderBy('created_at', 'desc');
-  res.json({ data: { ...lead, score: scoreLead(lead), estimates } });
-}));
+// Update lead
+router.put('/:leadId', authMiddleware, async (req, res) => {
+  try {
+    const { leadId } = req.params;
+    const userId = req.user.id;
+    const updateData = req.body;
+    
+    const lead = await PropertyService.updateLead(leadId, userId, updateData);
+    
+    if (!lead) {
+      return res.status(404).json({
+        success: false,
+        error: 'Lead not found'
+      });
+    }
+    
+    res.json({
+      success: true,
+      data: lead,
+      message: 'Lead updated successfully'
+    });
+  } catch (error) {
+    logger.error(`Error updating lead ${req.params.leadId}:`, error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to update lead'
+    });
+  }
+});
+
+// Delete lead
+router.delete('/:leadId', authMiddleware, async (req, res) => {
+  try {
+    const { leadId } = req.params;
+    const userId = req.user.id;
+    
+    const deleted = await PropertyService.deleteLead(leadId, userId);
+    
+    if (!deleted) {
+      return res.status(404).json({
+        success: false,
+        error: 'Lead not found'
+      });
+    }
+    
+    res.json({
+      success: true,
+      message: 'Lead deleted successfully'
+    });
+  } catch (error) {
+    logger.error(`Error deleting lead ${req.params.leadId}:`, error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to delete lead'
+    });
+  }
+});
+
+// Update lead status
+router.patch('/:leadId/status', authMiddleware, async (req, res) => {
+  try {
+    const { leadId } = req.params;
+    const userId = req.user.id;
+    const { status, notes } = req.body;
+    
+    const lead = await PropertyService.updateLeadStatus(leadId, userId, status, notes);
+    
+    if (!lead) {
+      return res.status(404).json({
+        success: false,
+        error: 'Lead not found'
+      });
+    }
+    
+    res.json({
+      success: true,
+      data: lead,
+      message: 'Lead status updated successfully'
+    });
+  } catch (error) {
+    logger.error(`Error updating lead status ${req.params.leadId}:`, error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to update lead status'
+    });
+  }
+});
+
+// Add lead note
+router.post('/:leadId/notes', authMiddleware, async (req, res) => {
+  try {
+    const { leadId } = req.params;
+    const userId = req.user.id;
+    const { content, type = 'general' } = req.body;
+    
+    const note = await PropertyService.addLeadNote(leadId, userId, {
+      content,
+      type,
+      createdAt: new Date()
+    });
+    
+    res.status(201).json({
+      success: true,
+      data: note,
+      message: 'Lead note added successfully'
+    });
+  } catch (error) {
+    logger.error(`Error adding note to lead ${req.params.leadId}:`, error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to add lead note'
+    });
+  }
+});
+
+// Get lead activities
+router.get('/:leadId/activities', authMiddleware, async (req, res) => {
+  try {
+    const { leadId } = req.params;
+    const userId = req.user.id;
+    
+    const activities = await PropertyService.getLeadActivities(leadId, userId);
+    
+    res.json({
+      success: true,
+      data: activities,
+      count: activities.length,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    logger.error(`Error fetching lead activities ${req.params.leadId}:`, error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch lead activities'
+    });
+  }
+});
+
+// Schedule follow-up
+router.post('/:leadId/followup', authMiddleware, async (req, res) => {
+  try {
+    const { leadId } = req.params;
+    const userId = req.user.id;
+    const { scheduledDate, type, notes, priority = 'medium' } = req.body;
+    
+    const followUp = await PropertyService.scheduleFollowUp(leadId, userId, {
+      scheduledDate: new Date(scheduledDate),
+      type,
+      notes,
+      priority
+    });
+    
+    res.status(201).json({
+      success: true,
+      data: followUp,
+      message: 'Follow-up scheduled successfully'
+    });
+  } catch (error) {
+    logger.error(`Error scheduling follow-up for lead ${req.params.leadId}:`, error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to schedule follow-up'
+    });
+  }
+});
+
+// Get lead score
+router.get('/:leadId/score', authMiddleware, async (req, res) => {
+  try {
+    const { leadId } = req.params;
+    const userId = req.user.id;
+    
+    const score = await PropertyService.calculateLeadScore(leadId, userId);
+    
+    res.json({
+      success: true,
+      data: score,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    logger.error(`Error calculating lead score ${req.params.leadId}:`, error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to calculate lead score'
+    });
+  }
+});
+
+// Get lead statistics
+router.get('/stats/overview', authMiddleware, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { period = '30d' } = req.query;
+    
+    const stats = await PropertyService.getLeadStatistics(userId, period);
+    
+    res.json({
+      success: true,
+      data: stats,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    logger.error('Error fetching lead statistics:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch lead statistics'
+    });
+  }
+});
+
+// Convert lead to opportunity
+router.post('/:leadId/convert', authMiddleware, async (req, res) => {
+  try {
+    const { leadId } = req.params;
+    const userId = req.user.id;
+    const { opportunityType, notes, estimatedValue } = req.body;
+    
+    const opportunity = await PropertyService.convertLeadToOpportunity(leadId, userId, {
+      opportunityType,
+      notes,
+      estimatedValue
+    });
+    
+    res.json({
+      success: true,
+      data: opportunity,
+      message: 'Lead converted to opportunity successfully'
+    });
+  } catch (error) {
+    logger.error(`Error converting lead ${req.params.leadId}:`, error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to convert lead'
+    });
+  }
+});
+
+// Get lead pipeline
+router.get('/pipeline/status', authMiddleware, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { dateRange = '30d' } = req.query;
+    
+    const pipeline = await PropertyService.getLeadPipeline(userId, dateRange);
+    
+    res.json({
+      success: true,
+      data: pipeline,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    logger.error('Error fetching lead pipeline:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch lead pipeline'
+    });
+  }
+});
+
+// Bulk update leads
+router.patch('/bulk/update', authMiddleware, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { leadIds, updateData } = req.body;
+    
+    const results = await PropertyService.bulkUpdateLeads(leadIds, userId, updateData);
+    
+    res.json({
+      success: true,
+      data: results,
+      message: 'Bulk update completed successfully'
+    });
+  } catch (error) {
+    logger.error('Error performing bulk lead update:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to perform bulk update'
+    });
+  }
+});
 
 module.exports = router;
-module.exports.scoreLead = scoreLead;

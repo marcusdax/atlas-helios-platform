@@ -1,28 +1,15 @@
-/**
- * TensorFlow is loaded only if it is installed.
- *
- * @tensorflow/tfjs-node is a ~300MB native build, and this service does not
- * currently run a real model through it - loadModels() simulates. Requiring it
- * unconditionally made the whole backend unbootable for anyone who had not
- * installed it, to buy nothing. Install it and the service reports
- * `mode: 'tensorflow'`; without it, `mode: 'simulated'`, and every analysis
- * result is labelled so a caller can never mistake a heuristic for inference.
- */
-let tf = null;
+let tf;
 try {
-  // eslint-disable-next-line global-require, import/no-extraneous-dependencies
   tf = require('@tensorflow/tfjs-node');
-} catch {
+} catch (e) {
   tf = null;
 }
 const sharp = require('sharp');
 const fs = require('fs').promises;
 const path = require('path');
 const axios = require('axios');
-// Node's built-in generator: the uuid package is ESM-only from v14, which
-// cannot be required from this CommonJS backend or loaded by Jest.
-const { randomUUID: uuidv4 } = require('node:crypto');
-const logger = require('../utils/logger');
+const { v4: uuidv4 } = require('uuid');
+const { logger } = require('../utils/logger');
 
 /**
  * Computer Vision Service for Property Analysis
