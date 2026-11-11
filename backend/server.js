@@ -25,6 +25,17 @@ const leadRoutes = require('./src/routes/leadRoutes');
 const estimateRoutes = require('./src/routes/estimateRoutes');
 const renderRoutes = require('./src/routes/renderRoutes');
 const radarRoutes = require('./src/routes/radarRoutes');
+/*
+  The NOAA weather and Nexus Mind routers.
+
+  Both arrived with their services on main but were never mounted, so
+  /api/weather/status - which main's own frontend calls on load - answered 404.
+  Each router loads its service optionally and answers 503 when it is not
+  configured, so mounting them cannot take the server down when the upstreams
+  are absent.
+*/
+const weatherRoutes = require('./src/routes/weatherRoutes');
+const nexusRoutes = require('./src/routes/nexusRoutes');
 
 // Middleware
 const { authMiddleware } = require('./src/middleware/auth');
@@ -100,6 +111,8 @@ app.use('/api/leads', leadRoutes);
 app.use('/api/estimates', estimateRoutes);
 app.use('/api/renders', renderRoutes);
 app.use('/api/radar', radarRoutes);
+app.use('/api/weather', weatherRoutes);
+app.use('/api/nexus', nexusRoutes);
 
 // Protected routes (require authentication)
 app.use('/api/private', authMiddleware, (req, res) => {

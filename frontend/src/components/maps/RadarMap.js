@@ -1,5 +1,12 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import maplibregl from 'maplibre-gl';
+/*
+  A namespace import, not a default one.
+
+  maplibre-gl v6 is ESM-only and exports no default, so `import maplibregl from
+  'maplibre-gl'` fails the build outright. The bump to v6 arrived on main from
+  dependabot without this call site being updated with it.
+*/
+import * as maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import {
   RadarTimeline, RadarLanes,
