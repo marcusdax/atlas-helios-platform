@@ -90,6 +90,29 @@ test('the properties lane reads both counts and ranks the dispatch queue', () =>
   assert.equal(lane.priorityProperties[1].timestamp, Date.parse('2023-11-14T21:10:00Z'));
 });
 
+test('coordinates are carried, and an ungeocoded row is not placed at 0,0', () => {
+  // The map pins these same rows, so the coordinates ride along rather than
+  // costing a second read. `Number(null)` is 0 and 0,0 is open ocean off
+  // Africa, so an ungeocoded property has to come through as null.
+  const lane = propertiesLane({
+    highRisk: {
+      data: [
+        { id: 'a', address: 'geocoded', latitude: '32.7767', longitude: '-96.7970', damage_probability: 90 },
+        { id: 'b', address: 'ungeocoded', latitude: null, longitude: '', damage_probability: 80 },
+        { id: 'c', address: 'junk coords', latitude: 'north a bit', longitude: 'left', damage_probability: 70 }
+      ]
+    }
+  });
+
+  const [a, b, c] = lane.priorityProperties;
+  assert.equal(a.latitude, 32.7767);
+  assert.equal(a.longitude, -96.797);
+  assert.equal(b.latitude, null);
+  assert.equal(b.longitude, null);
+  assert.equal(c.latitude, null);
+  assert.equal(c.longitude, null);
+});
+
 test('a property with no id is dropped rather than rendered without a key', () => {
   const lane = propertiesLane({ highRisk: { data: [{ address: 'nowhere' }, { id: 'x', address: 'somewhere' }] } });
   assert.deepEqual(lane.priorityProperties.map((p) => p.id), ['x']);

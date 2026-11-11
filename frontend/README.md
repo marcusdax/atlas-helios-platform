@@ -27,6 +27,11 @@ root, which starts both.
 
 > Full contract: [`DESIGN/dashboard-data-layer.md`](../DESIGN/dashboard-data-layer.md)
 
+`App.js` mounts one `DashboardDataProvider`, which owns a single live store.
+Every consumer below it — the dashboard panels, the sidebar — reads that one
+store through `useDashboardData()`, so one set of requests serves the screen and
+two panels cannot disagree by a poll interval.
+
 The dashboard reads **one hook**. It owns no data, fetches nothing itself, and
 holds no state about what the numbers are:
 
@@ -157,7 +162,6 @@ Committed stories:
 | `Dashboard/ActivityFeed` | Skeletons, rows, degraded, and empty-vs-offline |
 | `Dashboard/PriorityQueue` | Every state, plus a property nobody has assessed |
 
-There is deliberately **no full-page `Dashboard` story**: `StormMap` and
-`PredictionChart` still own their own data, so the page would not render
-meaningfully without a network. Those two are on the list in
-[`DESIGN/dashboard-data-layer.md`](../DESIGN/dashboard-data-layer.md#still-mock-elsewhere).
+There is deliberately **no full-page `Dashboard` story**: `RadarMap` fetches
+radar tiles and alert polygons of its own, so the page would not render
+meaningfully without a network.

@@ -32,6 +32,18 @@ function toEpoch(value) {
   return Number.isNaN(parsed) ? null : parsed;
 }
 
+/**
+ * A coordinate, or null.
+ *
+ * Separate from `toNumber` because the fallback must not be 0 here: a property
+ * with no latitude is not a property at latitude zero.
+ */
+function coordinate(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 /** A finite number, or the fallback. Guards `NaN`, `null` and `"42"` alike. */
 function toNumber(value, fallback = 0) {
   const n = typeof value === 'string' ? Number(value) : value;
@@ -115,7 +127,13 @@ function propertiesLane(payload, { priorityLimit = 5 } = {}) {
         risk: row?.current_risk_level
           ? String(row.current_risk_level).toLowerCase()
           : riskBandFor(row?.damage_probability),
-        timestamp: toEpoch(row?.last_assessment_date ?? row?.updated_at ?? row?.created_at)
+        timestamp: toEpoch(row?.last_assessment_date ?? row?.updated_at ?? row?.created_at),
+        // Carried so the same rows can be pinned on the map without a second
+        // read. Parsed strictly: `Number(null)` is 0 and 0,0 is the Gulf of
+        // Guinea, half a world from any customer, so an ungeocoded row has to
+        // come through as null and be dropped rather than drawn.
+        latitude: coordinate(row?.latitude),
+        longitude: coordinate(row?.longitude)
       }))
       .filter((p) => p.id !== '')
       .sort((a, b) => b.score - a.score)
@@ -416,6 +434,7 @@ function mergeSummaryPatch(summary, patch) {
 module.exports = {
   toEpoch,
   toNumber,
+  coordinate,
   countOf,
   rowsOf,
   riskBandFor,

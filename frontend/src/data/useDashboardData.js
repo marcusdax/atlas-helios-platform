@@ -36,15 +36,32 @@ const POLL_MS = 60_000;
 const TICK_MS = 15_000;
 
 /**
- * Provide a fixed view to everything below.
+ * Provide one dashboard view to everything below.
  *
- * Used by stories and tests. It takes the view as a prop and imports no
- * fixtures itself, so no demo dataset can reach a production bundle through
- * this file.
+ * Two modes, and the second is the point:
+ *
+ * - With `value`, it provides that view verbatim and starts nothing. This is
+ *   the mock seam for stories and tests. It takes the view as a prop and
+ *   imports no fixtures itself, so no demo dataset can reach a production
+ *   bundle through this file.
+ *
+ * - Without `value`, it runs the live hook once and shares the result. Mounted
+ *   near the root, that is what makes a second consumer - the sidebar's
+ *   activity feed, say - *ask for* the figures rather than fetch them again.
+ *   Two independent stores would double the request load and, worse, drift:
+ *   two panels on one screen showing different counts because they polled a
+ *   second apart is a bug nobody can reproduce.
+ *
+ * @param {object} props
+ * @param {import('@atlas/dashboard-data').DashboardView} [props.value]
+ *        A fixed view. Omit it for the live store.
  */
-export function DashboardDataProvider({ value, children }) {
+export function DashboardDataProvider({ value, children, ...options }) {
+  const live = useLiveDashboardData({ ...options, enabled: value === undefined || value === null });
+  const resolved = value ?? live;
+
   return (
-    <DashboardDataContext.Provider value={value ?? null}>
+    <DashboardDataContext.Provider value={resolved}>
       {children}
     </DashboardDataContext.Provider>
   );

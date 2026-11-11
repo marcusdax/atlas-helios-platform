@@ -174,6 +174,35 @@ test('the provider supplies a view and the live machinery never starts', async (
   expect(gatewayCalled).toBe(false);
 });
 
+test('one live provider serves many consumers from a single set of reads', async () => {
+  // The claim this guards: a second panel that wants the same figures asks for
+  // them rather than fetching them again. Two stores on one screen would
+  // double the request load and drift apart between polls - two counts on one
+  // screen, differing by a poll interval, is a bug nobody can reproduce.
+  const calls = { properties: 0 };
+  const gateway = stubGateway({
+    properties: async () => { calls.properties += 1; return payloads.properties; }
+  });
+
+  const Consumer = ({ id }) => {
+    const { summary } = useDashboardData();
+    return <span data-testid={id}>{summary.totalProperties}</span>;
+  };
+
+  render(
+    <DashboardDataProvider gateway={gateway} pollMs={0}>
+      <Consumer id="a" />
+      <Consumer id="b" />
+      <Consumer id="c" />
+    </DashboardDataProvider>
+  );
+
+  await waitFor(() => expect(screen.getByTestId('a')).toHaveTextContent('1284'));
+  expect(screen.getByTestId('b')).toHaveTextContent('1284');
+  expect(screen.getByTestId('c')).toHaveTextContent('1284');
+  expect(calls.properties).toBe(1);
+});
+
 test('without a provider the hook falls through to the live store', async () => {
   const Consumer = () => {
     const { summary } = useDashboardData({ gateway: stubGateway(), pollMs: 0 });

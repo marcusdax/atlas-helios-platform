@@ -23,8 +23,20 @@ import './index.css';
 
 // Context Providers
 import { WebSocketProvider } from './contexts/WebSocketContext';
-import { StormProvider } from './contexts/StormContext';
-import { PropertyProvider } from './contexts/PropertyContext';
+/*
+  One dashboard store for the whole app.
+
+  This replaces StormProvider and PropertyProvider, which held mock storms,
+  mock assessments and mock properties, registered a second set of socket
+  listeners that removed other modules' handlers on cleanup, and - by the time
+  the dashboard stopped reading them - were consumed by nothing at all.
+
+  Mounted here rather than inside Dashboard so a second consumer (the
+  sidebar's activity feed) shares the same reads instead of issuing its own.
+  Two stores on one screen would double the request load and drift apart
+  between polls.
+*/
+import { DashboardDataProvider } from './data/useDashboardData';
 
 function App() {
   useEffect(() => {
@@ -46,54 +58,52 @@ function App() {
     <Router>
       <div className="App min-h-screen bg-neutral-950 text-neutral-100">
         <WebSocketProvider>
-          <StormProvider>
-            <PropertyProvider>
-              {/* Storm Alert Banner */}
-              <StormAlert />
+          <DashboardDataProvider>
+            {/* Storm Alert Banner */}
+            <StormAlert />
+            
+            {/* Main Layout */}
+            <div className="flex h-screen overflow-hidden">
+              {/* Navigation */}
+              <Navigation />
               
-              {/* Main Layout */}
-              <div className="flex h-screen overflow-hidden">
-                {/* Navigation */}
-                <Navigation />
-                
-                {/* Sidebar */}
-                <Sidebar />
-                
-                {/* Main Content */}
-                <main className="flex-1 overflow-y-auto bg-neutral-950">
-                  <motion.div
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.3 }}
-                    className="p-6"
-                  >
-                    <Routes>
-                      <Route path="/" element={<Dashboard />} />
-                      <Route path="/storm-intelligence" element={<StormIntelligence />} />
-                      <Route path="/property-assessment" element={<PropertyAssessment />} />
-                      <Route path="/lead-management" element={<LeadManagement />} />
-                      <Route path="/estimate-generator" element={<EstimateGenerator />} />
-                      <Route path="/mobile-field" element={<MobileFieldTool />} />
-                      <Route path="/settings" element={<Settings />} />
-                    </Routes>
-                  </motion.div>
-                </main>
-              </div>
+              {/* Sidebar */}
+              <Sidebar />
               
-              {/* Toast Notifications */}
-              <Toaster
-                position="top-right"
-                toastOptions={{
-                  duration: 4000,
-                  style: {
-                    background: '#1F1F1F',
-                    color: '#E4E4E7',
-                    border: '1px solid #374151'
-                  }
-                }}
-              />
-            </PropertyProvider>
-          </StormProvider>
+              {/* Main Content */}
+              <main className="flex-1 overflow-y-auto bg-neutral-950">
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.3 }}
+                  className="p-6"
+                >
+                  <Routes>
+                    <Route path="/" element={<Dashboard />} />
+                    <Route path="/storm-intelligence" element={<StormIntelligence />} />
+                    <Route path="/property-assessment" element={<PropertyAssessment />} />
+                    <Route path="/lead-management" element={<LeadManagement />} />
+                    <Route path="/estimate-generator" element={<EstimateGenerator />} />
+                    <Route path="/mobile-field" element={<MobileFieldTool />} />
+                    <Route path="/settings" element={<Settings />} />
+                  </Routes>
+                </motion.div>
+              </main>
+            </div>
+            
+            {/* Toast Notifications */}
+            <Toaster
+              position="top-right"
+              toastOptions={{
+                duration: 4000,
+                style: {
+                  background: '#1F1F1F',
+                  color: '#E4E4E7',
+                  border: '1px solid #374151'
+                }
+              }}
+            />
+          </DashboardDataProvider>
         </WebSocketProvider>
       </div>
     </Router>

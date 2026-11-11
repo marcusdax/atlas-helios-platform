@@ -60,6 +60,19 @@
     ]
   },
   "proxy": "http://localhost:5000",
+  "_jestComment": [
+    "react-router-dom@7 re-exports from the subpath 'react-router/dom'. Webpack honours",
+    "the package's exports map and resolves it; the jest-resolve bundled with",
+    "react-scripts@5 predates exports maps, so any test that imports react-router-dom",
+    "fails to even load the suite. Mapping the subpath to the file the exports map",
+    "points at is the smallest fix that does not mean upgrading the whole toolchain -",
+    "and the app build is unaffected either way."
+  ],
+  "jest": {
+    "moduleNameMapper": {
+      "^react-router/dom$": "react-router/dist/development/dom-export.js"
+    }
+  },
   "devDependencies": {
     "tailwindcss": "^3.4.13",
     "postcss": "^8.5.23",

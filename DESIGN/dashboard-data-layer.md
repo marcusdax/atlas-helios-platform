@@ -60,7 +60,7 @@ feed producing it went down. That is what this layer is for.
 
 Everything below the hook is framework-free and lives in
 `packages/atlas-dashboard-data`. That is not architectural decoration: it is why
-the whole lifecycle can be tested without a renderer (91 tests, no DOM), and why
+the whole lifecycle can be tested without a renderer (93 tests, no DOM), and why
 the mobile field tool can consume the same model later without importing React.
 
 ---
@@ -213,8 +213,8 @@ every component stay exactly as they are. That seam is why this layer exists.
 
 | Suite | Command | Covers |
 |---|---|---|
-| Data layer (91 tests, no DOM) | `npm test --workspace=@atlas/dashboard-data` | state machine incl. an exhaustive 720-combination totality check, normalisers, cache, store integration, fixture/state agreement |
-| React layer (31 tests) | `cd frontend && npm test` | hook ↔ store wiring, cache hydration across mounts, provider short-circuit, gateway request shapes, per-state component rendering |
+| Data layer (93 tests, no DOM) | `npm test --workspace=@atlas/dashboard-data` | state machine incl. an exhaustive 720-combination totality check, normalisers, cache, store integration, fixture/state agreement |
+| React layer (36 tests) | `cd frontend && npm test` | hook ↔ store wiring, cache hydration across mounts, provider short-circuit, gateway request shapes, per-state component rendering |
 
 Both run from the repo root via `npm run test:all`.
 
@@ -226,6 +226,8 @@ than behaviour:
   treatments looks fine in review. So the tests render all five and assert the
   output differs, including with colour classes stripped, because colour alone
   fails a sunlit tablet.
+- **One live provider serves many consumers from one set of reads.** The sidebar
+  and the panels beside it share a store; the test counts the requests.
 - **Fixtures derive the state they claim.** The Storybook gallery and the
   component tests share one set of fixtures, and
   `packages/atlas-dashboard-data/test/fixtures.test.js` feeds each fixture's own
@@ -250,19 +252,48 @@ megabytes of unpinned devDependencies to a workspace whose Docker build runs
 
 ---
 
-## Still mock elsewhere
+## One store for the whole screen
 
-This task's scope was `fetchDashboardData()`, and the dashboard no longer reads
-any of the below. They are the same defect class and the obvious next item:
+`DashboardDataProvider` has two modes. With a `value` it provides that view and
+starts nothing — the mock seam. Without one it runs the live hook and shares the
+result, and it is mounted near the root in `App.js`.
 
-- `contexts/StormContext.js` — `initializeStormData()` seeds two mock storms and
-  two mock assessments; `getWeatherForecast()` generates a forecast with
-  `Math.random()`.
-- `contexts/PropertyContext.js` — mock properties and assessments.
-- `components/maps/StormMap.js` — hardcoded property pins.
-- `components/layout/Sidebar.js` — a hardcoded recent-activity line.
-- `components/charts/PredictionChart.js` — the entire ECharts series is a
-  literal array; it reads no data source at all.
+That is what makes a second consumer *ask for* the figures rather than fetch
+them again. The sidebar's figures and activity feed read the same store as the
+panels beside them, so one set of requests serves the screen — and, more
+importantly, two panels cannot show counts that differ by a poll interval,
+which is a bug nobody can reproduce.
 
-Each has a real endpoint available (`/api/storms`, `/api/properties`,
-`/api/radar/*`) and can move onto the same store/lane pattern.
+---
+
+## What the mock data turned out to be
+
+The sweep after `fetchDashboardData()` found most of the rest of it was not
+waiting to be wired up — it was dead, or already had a real replacement sitting
+beside it unused:
+
+| Was | Now |
+|---|---|
+| `contexts/StormContext.js` — two mock storms, two mock assessments, a `Math.random()` forecast, ~290 lines | **Deleted.** Nothing consumed `useStorm` once the dashboard stopped. Its cleanup also called `socket.off('storm_alert')` with no handler, which removes *every* listener for that event — including other modules'. |
+| `contexts/PropertyContext.js` — mock properties and assessments, ~160 lines | **Deleted.** Nothing consumed `useProperty`. |
+| `components/maps/StormMap.js` — a Leaflet map with ten hardcoded addresses pinned around downtown Dallas | **Deleted.** The dashboard now renders `RadarMap` — animated NOAA radar, NWS warning polygons, real property pins — which already existed and which the Storm Intelligence page was already using. |
+| `components/layout/Sidebar.js` — twelve literal stats with invented trends (`'47'` / `'+12'`), three hardcoded activity sentences, and quick-action buttons whose handler was a `console.log` | **Rewritten** against the shared store, with per-lane "last known" marking. Links are router `Link`s to routes that exist; several of the old targets (`/property-assessment/new`, `/marketing`) never did. |
+
+The priority queue's rows now carry `latitude`/`longitude`, so the map pins and
+the dispatch list come from one read and cannot disagree about who the worst
+roof is. `toPropertyFeatures` in `@atlas/radar-map` accepts the domain model's
+`score` as well as the raw column's `damage_probability`, so one map component
+serves both callers without either reshaping for the other.
+
+### Still not real
+
+`components/charts/PredictionChart.js` — the entire ECharts series is a literal
+array, and there is no forecast endpoint to point it at. `StormService` reads
+the NWS hourly forecast internally to detect severe conditions but never
+exposes it, so a real chart needs a backend endpoint first — a change worth its
+own review, not a guess.
+
+Until then the panel is **labelled**: *"Sample shape only — no forecast feed is
+connected yet."* An unlabelled chart of invented numbers under the heading
+"24-Hour Weather Forecast" is the same defect as the mock tiles, and the
+cheapest honest answer is to say so on the panel.

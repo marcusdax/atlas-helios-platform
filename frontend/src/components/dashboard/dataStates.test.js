@@ -1,5 +1,6 @@
 import React from 'react';
 import { render, screen, within } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { DATA_STATES } from '@atlas/dashboard-data';
 import { dashboardFixtures } from '@atlas/dashboard-data/src/fixtures';
 
@@ -7,6 +8,8 @@ import QuickStats from '../ui/QuickStats';
 import DataStateBadge from '../ui/DataStateBadge';
 import ActivityFeed from './ActivityFeed';
 import PriorityQueue from './PriorityQueue';
+import Sidebar from '../layout/Sidebar';
+import { DashboardDataProvider } from '../../data/useDashboardData';
 
 /**
  * The acceptance criterion these tests exist for: *UI components render
@@ -237,5 +240,83 @@ describe('PriorityQueue', () => {
       return html;
     });
     expect(new Set(renders).size).toBe(STATES.length);
+  });
+});
+
+/* ---------------------------------------------------------------- sidebar -- */
+
+describe('Sidebar', () => {
+  test('its figures and feed come from the shared store, with no invented trend', () => {
+    const view = fixtures[DATA_STATES.LIVE];
+    const { container } = render(
+      <MemoryRouter>
+        <DashboardDataProvider value={view}>
+          <Sidebar />
+        </DashboardDataProvider>
+      </MemoryRouter>
+    );
+
+    expect(screen.getByText('47')).toBeInTheDocument();
+    expect(screen.getByText('High-risk properties')).toBeInTheDocument();
+    expect(screen.getByText(view.activity[0].message)).toBeInTheDocument();
+    // The old sidebar carried '+12' and '-3%' beside each figure as literals.
+    expect(container.textContent).not.toMatch(/[+-]\d+(\.\d+)?%?$/m);
+  });
+
+  test('a failed lane marks its own figure, and only its own', () => {
+    const view = fixtures[DATA_STATES.DEGRADED];
+
+    // The DEGRADED fixture's failed lane is `alerts`, which no sidebar figure
+    // depends on - so nothing is hedged and the three current figures are not
+    // tarred with another lane's outage.
+    const { unmount } = render(
+      <MemoryRouter>
+        <DashboardDataProvider value={view}>
+          <Sidebar />
+        </DashboardDataProvider>
+      </MemoryRouter>
+    );
+    expect(screen.queryByText('last known')).not.toBeInTheDocument();
+    unmount();
+
+    // Move the outage onto a lane the sidebar does read, and exactly one
+    // figure - Active storms - should admit it.
+    render(
+      <MemoryRouter>
+        <DashboardDataProvider value={{ ...view, failedSources: ['storms'] }}>
+          <Sidebar />
+        </DashboardDataProvider>
+      </MemoryRouter>
+    );
+    expect(screen.getAllByText('last known')).toHaveLength(1);
+  });
+
+  test('a route shows its own title rather than falling back to "Dashboard"', () => {
+    render(
+      <MemoryRouter initialEntries={['/settings']}>
+        <DashboardDataProvider value={fixtures[DATA_STATES.LIVE]}>
+          <Sidebar />
+        </DashboardDataProvider>
+      </MemoryRouter>
+    );
+    expect(screen.getByRole('heading', { name: 'Settings' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Dashboard' })).not.toBeInTheDocument();
+  });
+
+  test('every quick link points at a route that exists', () => {
+    render(
+      <MemoryRouter>
+        <DashboardDataProvider value={fixtures[DATA_STATES.LIVE]}>
+          <Sidebar />
+        </DashboardDataProvider>
+      </MemoryRouter>
+    );
+    // The old buttons console.logged, and some named routes the router has
+    // never had ('/property-assessment/new', '/marketing').
+    const real = ['/', '/storm-intelligence', '/property-assessment', '/lead-management',
+      '/estimate-generator', '/mobile-field', '/settings'];
+    for (const link of screen.getAllByRole('link')) {
+      expect(real).toContain(link.getAttribute('href'));
+    }
   });
 });
