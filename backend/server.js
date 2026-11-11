@@ -1,13 +1,3 @@
-console.log('Server.js starting...');
-
-process.on('unhandledRejection', (reason, promise) => {
-  console.log('UNHANDLED REJECTION at:', promise, 'reason:', reason);
-});
-process.on('uncaughtException', (err) => {
-  console.log('UNCAUGHT EXCEPTION:', err);
-});
-
-console.log('About to require database');
 require('dotenv').config();
 const express = require('express');
 const http = require('http');
@@ -18,59 +8,34 @@ const morgan = require('morgan');
 const compression = require('compression');
 const rateLimit = require('express-rate-limit');
 
-console.log('About to require database...');
 // Database
 const db = require('./config/database');
-console.log('Database required');
 
-console.log('About to require services...');
 // Services
 const StormService = require('./src/services/StormService');
 const PropertyService = require('./src/services/PropertyService');
-let ComputerVisionService;
-try {
-  ComputerVisionService = require('./src/services/ComputerVisionService');
-} catch (e) {
-  console.warn('ComputerVisionService not available - AI features disabled');
-  ComputerVisionService = null;
-}
-
-// Nexus Mind AI Integration
-let NexusMindIntegration;
-try {
-  NexusMindIntegration = require('./src/integrations/NexusMindIntegration');
-  console.log('Nexus Mind Integration loaded');
-} catch (e) {
-  console.warn('Nexus Mind Integration not available:', e.message);
-  NexusMindIntegration = null;
-}
-
-// NOAA Weather Service Integration
-let NOAAWeatherService;
-try {
-  NOAAWeatherService = require('./src/services/NOAAWeatherService');
-  console.log('NOAA Weather Service loaded');
-} catch (e) {
-  console.warn('NOAA Weather Service not available:', e.message);
-  NOAAWeatherService = null;
-}
-console.log('Services required');
+const ComputerVisionService = require('./src/services/ComputerVisionService');
 
 // Routes
-console.log('About to require routes...');
 const authRoutes = require('./src/routes/authRoutes');
-console.log('authRoutes OK');
 const stormRoutes = require('./src/routes/stormRoutes');
-console.log('stormRoutes OK');
 const propertyRoutes = require('./src/routes/propertyRoutes');
-console.log('propertyRoutes OK');
 const assessmentRoutes = require('./src/routes/assessmentRoutes');
-console.log('assessmentRoutes OK');
 const leadRoutes = require('./src/routes/leadRoutes');
-console.log('leadRoutes OK');
 const estimateRoutes = require('./src/routes/estimateRoutes');
 const renderRoutes = require('./src/routes/renderRoutes');
 const radarRoutes = require('./src/routes/radarRoutes');
+/*
+  The NOAA weather and Nexus Mind routers.
+
+  Both arrived with their services on main but were never mounted, so
+  /api/weather/status - which main's own frontend calls on load - answered 404.
+  Each router loads its service optionally and answers 503 when it is not
+  configured, so mounting them cannot take the server down when the upstreams
+  are absent.
+*/
+const weatherRoutes = require('./src/routes/weatherRoutes');
+const nexusRoutes = require('./src/routes/nexusRoutes');
 
 // Middleware
 const { authMiddleware } = require('./src/middleware/auth');
@@ -78,9 +43,7 @@ const { errorHandler } = require('./src/middleware/errorHandler');
 const logger = require('./src/utils/logger');
 
 const app = express();
-console.log('Express app created');
 const server = http.createServer(app);
-console.log('HTTP server created');
 
 // CORS Configuration
 const corsOptions = {
@@ -89,15 +52,12 @@ const corsOptions = {
   optionsSuccessStatus: 200
 };
 
-console.log('Setting up Socket.IO...');
 // Socket.IO Setup
 const io = socketIo(server, {
   cors: corsOptions,
   transports: ['websocket', 'polling']
 });
-console.log('Socket.IO setup complete');
 
-console.log('Setting up middleware...');
 // Middleware
 app.use(helmet({
   contentSecurityPolicy: {
@@ -112,18 +72,13 @@ app.use(helmet({
   }
 }));
 
-console.log('Setting up cors...');
 app.use(cors(corsOptions));
-console.log('Setting up compression...');
 app.use(compression());
-console.log('Setting up morgan...');
 app.use(morgan('combined', { stream: logger.stream }));
-console.log('Setting up express.json...');
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // Rate Limiting
-console.log('Setting up rate limiting...');
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 1000, // limit each IP to 1000 requests per windowMs
@@ -133,10 +88,9 @@ const limiter = rateLimit({
 });
 app.use('/api/', limiter);
 
-console.log('Setting up health check...');
 // Health Check
-app.get('/health', async (req, res) => {
-  const healthStatus = {
+app.get('/health', (req, res) => {
+  res.status(200).json({
     status: 'OK',
     timestamp: new Date().toISOString(),
     version: process.env.npm_package_version || '1.0.0',
@@ -148,7 +102,6 @@ app.get('/health', async (req, res) => {
   });
 });
 
-console.log('Setting up API routes...');
 // API Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/storms', stormRoutes);
@@ -158,6 +111,8 @@ app.use('/api/leads', leadRoutes);
 app.use('/api/estimates', estimateRoutes);
 app.use('/api/renders', renderRoutes);
 app.use('/api/radar', radarRoutes);
+app.use('/api/weather', weatherRoutes);
+app.use('/api/nexus', nexusRoutes);
 
 // Protected routes (require authentication)
 app.use('/api/private', authMiddleware, (req, res) => {
@@ -165,11 +120,9 @@ app.use('/api/private', authMiddleware, (req, res) => {
 });
 
 // Error Handling
-console.log('Setting up error handling...');
 app.use(errorHandler);
 
 // Socket.IO Events
-console.log('Setting up Socket.IO events...');
 io.on('connection', (socket) => {
   logger.info(`Client connected: ${socket.id}`);
 
@@ -212,34 +165,9 @@ const initializeServices = async () => {
     await PropertyService.initialize(io);
     logger.info('Property Service initialized');
 
-    // Initialize Computer Vision Service (if available)
-    if (ComputerVisionService) {
-      await ComputerVisionService.initialize();
-      logger.info('Computer Vision Service initialized');
-    }
-
-    // Initialize Nexus Mind AI Integration
-    if (NexusMindIntegration && process.env.ENABLE_NEXUS_COGNITIVE === 'true') {
-      try {
-        const nexusStatus = await NexusMindIntegration.initialize({
-          device: 'cpu',
-          perceptionConfig: process.env.PERCEPTION_CONFIG || 'PE-Core-B16-224'
-        });
-        logger.info('Nexus Mind AI Integration initialized:', nexusStatus);
-      } catch (nexusError) {
-        logger.warn('Nexus Mind AI Integration failed to initialize:', nexusError.message);
-      }
-    }
-
-    // Initialize NOAA Weather Service
-    if (NOAAWeatherService) {
-      try {
-        const weatherStatus = await NOAAWeatherService.initialize();
-        logger.info('NOAA Weather Service initialized:', weatherStatus);
-      } catch (weatherError) {
-        logger.warn('NOAA Weather Service failed to initialize:', weatherError.message);
-      }
-    }
+    // Initialize Computer Vision Service
+    await ComputerVisionService.initialize();
+    logger.info('Computer Vision Service initialized');
 
   } catch (error) {
     logger.error('Service initialization failed:', error);
@@ -264,10 +192,7 @@ process.on('SIGINT', async () => {
 // Start Server
 const PORT = process.env.PORT || 5000;
 
-console.log('About to call server.listen on port', PORT);
-
 server.listen(PORT, async () => {
-  console.log('Server listen callback triggered');
   logger.info(`Server running on port ${PORT}`);
   logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
   
@@ -281,7 +206,4 @@ server.listen(PORT, async () => {
 
   // Initialize services
   await initializeServices();
-}).on('error', (err) => {
-  console.error('Server listen error:', err);
-  logger.error('Server listen error:', err);
 });

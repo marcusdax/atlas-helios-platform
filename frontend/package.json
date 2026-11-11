@@ -29,14 +29,17 @@
     "workbox-routing": "^6.5.4",
     "workbox-strategies": "^6.5.4",
     "maplibre-gl": "^6.9.1",
-    "@atlas/radar-map": "0.1.0"
+    "@atlas/radar-map": "0.1.0",
+    "@atlas/dashboard-data": "0.1.0"
   },
   "scripts": {
     "start": "react-scripts start",
     "build": "react-scripts build",
     "test": "react-scripts test",
     "eject": "react-scripts eject",
-    "build:sw": "workbox generateSW"
+    "build:sw": "workbox generateSW",
+    "storybook": "storybook dev -p 6006",
+    "build-storybook": "storybook build"
   },
   "eslintConfig": {
     "extends": [
@@ -57,6 +60,19 @@
     ]
   },
   "proxy": "http://localhost:5000",
+  "_jestComment": [
+    "react-router-dom@7 re-exports from the subpath 'react-router/dom'. Webpack honours",
+    "the package's exports map and resolves it; the jest-resolve bundled with",
+    "react-scripts@5 predates exports maps, so any test that imports react-router-dom",
+    "fails to even load the suite. Mapping the subpath to the file the exports map",
+    "points at is the smallest fix that does not mean upgrading the whole toolchain -",
+    "and the app build is unaffected either way."
+  ],
+  "jest": {
+    "moduleNameMapper": {
+      "^react-router/dom$": "react-router/dist/development/dom-export.js"
+    }
+  },
   "devDependencies": {
     "tailwindcss": "^3.4.13",
     "postcss": "^8.5.25",

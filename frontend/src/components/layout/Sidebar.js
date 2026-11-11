@@ -1,185 +1,253 @@
 import React from 'react';
-import { useLocation } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import {
   ChartBarIcon,
+  ClipboardDocumentCheckIcon,
+  CloudIcon,
+  Cog6ToothIcon,
+  CurrencyDollarIcon,
+  DevicePhoneMobileIcon,
   ExclamationTriangleIcon,
   MapIcon,
   UserGroupIcon,
   BellIcon
 } from '@heroicons/react/24/outline';
+import { DATA_STATES } from '@atlas/dashboard-data';
+import { useDashboardData, formatFreshness } from '../../data/useDashboardData';
+import DataStateBadge, { Skeleton, treatmentFor } from '../ui/DataStateBadge';
+
+/**
+ * The contextual sidebar.
+ *
+ * Three things were wrong with it, all the same thing.
+ *
+ * Its "Today's Stats" were twelve string literals - `'47'`, `'1,234'`,
+ * `'67%'` - each with an invented trend beside it (`'+12'`, `'-3%'`). Its
+ * "Recent Activity" was three hardcoded sentences, one of which named a real
+ * address and claimed it had been flagged two minutes ago. And its quick
+ * actions were buttons whose handler was a `console.log`, several pointing at
+ * routes that do not exist.
+ *
+ * The stats and the feed now come from the same shared dashboard store the
+ * main panels read - one set of requests for the whole screen, so the sidebar
+ * and the tiles beside it cannot show different numbers - and they carry the
+ * same data state, because a figure in a sidebar is no more trustworthy than
+ * the read that produced it. The quick actions are router links to routes that
+ * exist, and nothing else.
+ */
+
+/** Route → what the sidebar says about it. Only real routes, only real links. */
+const ROUTES = {
+  '/': {
+    title: 'Dashboard',
+    icon: ChartBarIcon,
+    links: [
+      { label: 'View active storms', to: '/storm-intelligence' },
+      { label: 'Start an assessment', to: '/property-assessment' },
+      { label: 'Generate an estimate', to: '/estimate-generator' }
+    ]
+  },
+  '/storm-intelligence': {
+    title: 'Storm Intelligence',
+    icon: ExclamationTriangleIcon,
+    links: [
+      { label: 'Assess an exposed property', to: '/property-assessment' },
+      { label: 'Review leads', to: '/lead-management' },
+      { label: 'Back to dashboard', to: '/' }
+    ]
+  },
+  '/property-assessment': {
+    title: 'Property Assessment',
+    icon: MapIcon,
+    links: [
+      { label: 'Generate an estimate', to: '/estimate-generator' },
+      { label: 'Open the field tool', to: '/mobile-field' },
+      { label: 'Check storm intelligence', to: '/storm-intelligence' }
+    ]
+  },
+  '/lead-management': {
+    title: 'Lead Management',
+    icon: UserGroupIcon,
+    links: [
+      { label: 'Generate an estimate', to: '/estimate-generator' },
+      { label: 'Assess a property', to: '/property-assessment' }
+    ]
+  },
+  '/estimate-generator': {
+    title: 'Estimate Generator',
+    icon: CurrencyDollarIcon,
+    links: [
+      { label: 'Review leads', to: '/lead-management' },
+      { label: 'Assess a property', to: '/property-assessment' }
+    ]
+  },
+  '/mobile-field': {
+    title: 'Field Tool',
+    icon: DevicePhoneMobileIcon,
+    links: [{ label: 'Back to dashboard', to: '/' }]
+  },
+  '/settings': {
+    title: 'Settings',
+    icon: Cog6ToothIcon,
+    links: [{ label: 'Back to dashboard', to: '/' }]
+  }
+};
+
+/** The three company-wide figures, named for the lane each depends on. */
+const STATS = [
+  { key: 'activeStorms', label: 'Active storms', source: 'storms', icon: CloudIcon },
+  { key: 'highRiskProperties', label: 'High-risk properties', source: 'properties', icon: ExclamationTriangleIcon },
+  { key: 'recentAssessments', label: 'Assessments (24h)', source: 'assessments', icon: ClipboardDocumentCheckIcon }
+];
+
+const SEVERITY_DOT = { warning: 'bg-yellow-500', error: 'bg-red-500', info: 'bg-blue-500' };
 
 const Sidebar = () => {
   const location = useLocation();
+  const { state, summary, activity, fetchedAt, failedSources } = useDashboardData();
 
-  const sidebarContent = {
-    '/': {
-      title: 'Dashboard',
-      icon: ChartBarIcon,
-      quickActions: [
-        { label: 'View Active Storms', action: 'navigate', target: '/storm-intelligence' },
-        { label: 'Recent Assessments', action: 'scroll', target: '#recent-assessments' },
-        { label: 'Export Reports', action: 'modal', target: 'export-modal' }
-      ],
-      stats: [
-        { label: 'Active Storms', value: '3', trend: '+2' },
-        { label: 'High-Risk Properties', value: '47', trend: '-5' },
-        { label: 'Pending Estimates', value: '12', trend: '+3' }
-      ]
-    },
-    '/storm-intelligence': {
-      title: 'Storm Intelligence',
-      icon: ExclamationTriangleIcon,
-      quickActions: [
-        { label: 'Refresh Data', action: 'api-call', target: 'refresh-storms' },
-        { label: 'Generate Alert', action: 'modal', target: 'alert-modal' },
-        { label: 'Export Storm Data', action: 'download', target: 'storm-report' }
-      ],
-      stats: [
-        { label: 'Storm Alerts Today', value: '5', trend: '+1' },
-        { label: 'Properties Tracked', value: '1,234', trend: '+89' },
-        { label: 'Risk Score Avg', value: '67%', trend: '-3%' }
-      ]
-    },
-    '/property-assessment': {
-      title: 'Property Assessment',
-      icon: MapIcon,
-      quickActions: [
-        { label: 'Start New Assessment', action: 'navigate', target: '/property-assessment/new' },
-        { label: 'Upload Photos', action: 'file-upload', target: 'photo-upload' },
-        { label: 'View History', action: 'scroll', target: '#assessment-history' }
-      ],
-      stats: [
-        { label: 'Assessments Today', value: '8', trend: '+2' },
-        { label: 'Avg Score', value: '72%', trend: '+5%' },
-        { label: 'Completion Rate', value: '94%', trend: '+1%' }
-      ]
-    },
-    '/lead-management': {
-      title: 'Lead Management',
-      icon: UserGroupIcon,
-      quickActions: [
-        { label: 'Export to CRM', action: 'api-call', target: 'export-crm' },
-        { label: 'Assign Teams', action: 'modal', target: 'assign-modal' },
-        { label: 'Generate Campaign', action: 'navigate', target: '/marketing' }
-      ],
-      stats: [
-        { label: 'New Leads', value: '47', trend: '+12' },
-        { label: 'Converted Today', value: '3', trend: '+1' },
-        { label: 'Follow-up Rate', value: '78%', trend: '-2%' }
-      ]
-    }
-  };
+  // An unknown path gets the dashboard's links but not its title - labelling
+  // the Settings page "Dashboard" was the old fallback's doing.
+  const route = ROUTES[location.pathname];
+  const title = route?.title || 'Atlas & Helios';
+  const Icon = route?.icon || ChartBarIcon;
+  const links = route?.links || ROUTES['/'].links;
 
-  const currentContent = sidebarContent[location.pathname] || sidebarContent['/'];
+  const treatment = treatmentFor(state);
+  const firstRead = state === DATA_STATES.SYNCING && fetchedAt === null;
+  const recent = activity.slice(0, 3);
 
   return (
-    <aside className="sidebar w-80 bg-neutral-900 border-r border-neutral-800 overflow-y-auto">
+    <aside className="sidebar w-80 overflow-y-auto border-r border-neutral-800 bg-neutral-900">
       <div className="p-6">
         {/* Header */}
-        <div className="flex items-center mb-6">
-          <currentContent.icon className="w-6 h-6 text-primary-500 mr-3" />
-          <h2 className="text-xl font-semibold text-neutral-100">
-            {currentContent.title}
-          </h2>
+        <div className="mb-6 flex items-center">
+          <Icon className="mr-3 h-6 w-6 text-primary-500" aria-hidden="true" />
+          <h2 className="text-xl font-semibold text-neutral-100">{title}</h2>
         </div>
 
-        {/* Quick Actions */}
-        <div className="mb-8">
-          <h3 className="text-sm font-medium text-neutral-400 uppercase tracking-wide mb-3">
-            Quick Actions
+        {/* Navigation */}
+        <nav className="mb-8" aria-label="Related pages">
+          <h3 className="mb-3 text-sm font-medium uppercase tracking-wide text-neutral-400">
+            Go to
           </h3>
           <div className="space-y-2">
-            {currentContent.quickActions.map((action, index) => (
-              <button
-                key={index}
-                className="w-full text-left px-3 py-2 text-sm text-neutral-300 hover:text-neutral-100 hover:bg-neutral-800 rounded-lg transition-colors"
-                onClick={() => handleQuickAction(action)}
+            {links.map((link) => (
+              <Link
+                key={link.to}
+                to={link.to}
+                className="block rounded-lg px-3 py-2 text-sm text-neutral-300 transition-colors hover:bg-neutral-800
+                  hover:text-neutral-100 focus-visible:outline focus-visible:outline-2
+                  focus-visible:outline-offset-2 focus-visible:outline-sky-500"
               >
-                {action.label}
-              </button>
+                {link.label}
+              </Link>
             ))}
           </div>
-        </div>
+        </nav>
 
-        {/* Stats */}
+        {/* Figures */}
         <div className="mb-8">
-          <h3 className="text-sm font-medium text-neutral-400 uppercase tracking-wide mb-3">
-            Today's Stats
-          </h3>
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <h3 className="text-sm font-medium uppercase tracking-wide text-neutral-400">
+              Right now
+            </h3>
+            <DataStateBadge state={state} compact />
+          </div>
+
           <div className="space-y-4">
-            {currentContent.stats.map((stat, index) => (
-              <div key={index} className="flex items-center justify-between">
-                <span className="text-sm text-neutral-400">{stat.label}</span>
-                <div className="flex items-center space-x-2">
-                  <span className="text-lg font-semibold text-neutral-100">
-                    {stat.value}
-                  </span>
-                  <span className={`text-xs font-medium ${
-                    stat.trend.startsWith('+') 
-                      ? 'text-green-500' 
-                      : stat.trend.startsWith('-') 
-                        ? 'text-red-500' 
-                        : 'text-neutral-400'
-                  }`}>
-                    {stat.trend}
-                  </span>
+            {STATS.map((stat) => {
+              const laneDown = failedSources.includes(stat.source);
+              return (
+                <div key={stat.key} className="flex items-center justify-between gap-3">
+                  <span className="text-sm text-neutral-400">{stat.label}</span>
+                  {firstRead ? (
+                    <Skeleton className="h-5 w-10" />
+                  ) : (
+                    <span className="flex items-baseline gap-2">
+                      <span className={`text-lg font-semibold text-neutral-100 ${treatment.dim}`}>
+                        {Number(summary[stat.key] ?? 0).toLocaleString()}
+                      </span>
+                      {/*
+                        No trend. There is no endpoint behind a day-over-day
+                        change, and the old sidebar simply made one up.
+                      */}
+                      {laneDown && (
+                        <span className="text-xs font-medium text-amber-300" title="This feed is unavailable; showing the last known figure.">
+                          last known
+                        </span>
+                      )}
+                    </span>
+                  )}
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
 
         {/* Recent Activity */}
         <div className="mb-8">
-          <h3 className="text-sm font-medium text-neutral-400 uppercase tracking-wide mb-3">
+          <h3 className="mb-3 text-sm font-medium uppercase tracking-wide text-neutral-400">
             Recent Activity
           </h3>
-          <div className="space-y-3">
-            <div className="flex items-start space-x-3">
-              <div className="w-2 h-2 bg-red-500 rounded-full mt-2"></div>
-              <div className="flex-1">
-                <p className="text-sm text-neutral-300">High-risk property detected</p>
-                <p className="text-xs text-neutral-500">1247 Oak Ridge Dr • 2 min ago</p>
-              </div>
+
+          {firstRead ? (
+            <div className="space-y-3" aria-hidden="true">
+              {[0, 1, 2].map((i) => (
+                <div key={i} className="flex items-start space-x-3">
+                  <Skeleton className="mt-2 h-2 w-2 rounded-full" />
+                  <div className="flex-1 space-y-1.5">
+                    <Skeleton className="h-3 w-full" />
+                    <Skeleton className="h-2.5 w-16" />
+                  </div>
+                </div>
+              ))}
             </div>
-            <div className="flex items-start space-x-3">
-              <div className="w-2 h-2 bg-blue-500 rounded-full mt-2"></div>
-              <div className="flex-1">
-                <p className="text-sm text-neutral-300">Storm alert generated</p>
-                <p className="text-xs text-neutral-500">Dallas County • 15 min ago</p>
-              </div>
-            </div>
-            <div className="flex items-start space-x-3">
-              <div className="w-2 h-2 bg-green-500 rounded-full mt-2"></div>
-              <div className="flex-1">
-                <p className="text-sm text-neutral-300">Estimate completed</p>
-                <p className="text-xs text-neutral-500">Property #2847 • 1 hour ago</p>
-              </div>
-            </div>
-          </div>
+          ) : recent.length === 0 ? (
+            <p className="text-sm text-neutral-500">
+              {state === DATA_STATES.OFFLINE
+                ? 'Nothing cached on this device.'
+                : 'Nothing in the last 24 hours.'}
+            </p>
+          ) : (
+            <ul className={`space-y-3 ${treatment.dim}`}>
+              {recent.map((event) => {
+                const when = formatFreshness(event.timestamp);
+                return (
+                  <li key={event.id} className="flex items-start space-x-3">
+                    <span
+                      className={`mt-2 h-2 w-2 shrink-0 rounded-full ${SEVERITY_DOT[event.severity] || SEVERITY_DOT.info}`}
+                      aria-hidden="true"
+                    />
+                    <div className="flex-1">
+                      <p className="text-sm text-neutral-300">{event.message}</p>
+                      <p className="text-xs text-neutral-500" title={when.absolute || undefined}>
+                        {when.relative}
+                      </p>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </div>
 
         {/* Notifications Toggle */}
         <div className="border-t border-neutral-800 pt-6">
           <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-3">
-              <BellIcon className="w-5 h-5 text-neutral-400" />
+            <label htmlFor="sidebar-notifications" className="flex items-center space-x-3">
+              <BellIcon className="h-5 w-5 text-neutral-400" aria-hidden="true" />
               <span className="text-sm text-neutral-300">Notifications</span>
-            </div>
-            <label className="relative inline-flex items-center cursor-pointer">
-              <input type="checkbox" className="sr-only peer" defaultChecked />
-              <div className="w-11 h-6 bg-neutral-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-500"></div>
             </label>
+            <span className="relative inline-flex cursor-pointer items-center">
+              <input id="sidebar-notifications" type="checkbox" className="peer sr-only" defaultChecked />
+              <span className="peer h-6 w-11 rounded-full bg-neutral-700 after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:bg-white after:transition-all after:content-[''] peer-checked:bg-primary-500 peer-checked:after:translate-x-full peer-focus:outline-none" />
+            </span>
           </div>
         </div>
       </div>
     </aside>
   );
-};
-
-const handleQuickAction = (action) => {
-  console.log('Quick action triggered:', action);
-  // Implement action handlers based on action.type
 };
 
 export default Sidebar;

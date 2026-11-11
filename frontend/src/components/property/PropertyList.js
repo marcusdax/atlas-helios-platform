@@ -29,13 +29,25 @@ const PropertyList = ({ properties, compact = false }) => {
   };
 
   const formatTimeAgo = (timestamp) => {
-    if (typeof timestamp === 'string') {
-      timestamp = new Date(timestamp);
+    // An unassessed property has no instant, and the old fallback to `new
+    // Date()` rendered that as "0 min ago" - a property nobody had ever looked
+    // at claiming to have been looked at just now.
+    if (timestamp === null || timestamp === undefined || timestamp === '') {
+      return 'not yet assessed';
     }
-    
+    if (typeof timestamp === 'string') {
+      const parsed = new Date(timestamp);
+      // A caller that passes an already-formatted label ("15 min ago") gets it
+      // back untouched rather than turned into "NaN min ago".
+      if (Number.isNaN(parsed.getTime())) return timestamp;
+      timestamp = parsed;
+    }
+
     const now = new Date();
     const diffInMinutes = Math.floor((now - timestamp) / (1000 * 60));
-    
+
+    if (Number.isNaN(diffInMinutes)) return 'not yet assessed';
+
     if (diffInMinutes < 60) {
       return `${diffInMinutes} min ago`;
     } else if (diffInMinutes < 1440) {
@@ -87,7 +99,7 @@ const PropertyList = ({ properties, compact = false }) => {
                 <div className="flex items-center space-x-1">
                   <ClockIcon className="w-4 h-4 text-neutral-500" />
                   <span className="text-neutral-400 text-xs">
-                    {formatTimeAgo(property.timestamp || property.timeAgo || new Date())}
+                    {formatTimeAgo(property.timestamp ?? property.timeAgo)}
                   </span>
                 </div>
                 

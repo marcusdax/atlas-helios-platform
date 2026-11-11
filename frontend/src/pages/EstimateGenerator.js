@@ -5,7 +5,7 @@ import toast from 'react-hot-toast';
 const EstimateGenerator = () => {
   const [estimates, setEstimates] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [selectedEstimate, setSelectedEstimate] = useState(null);
+  const [, setSelectedEstimate] = useState(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [lineItems, setLineItems] = useState([]);
   const [estimateData, setEstimateData] = useState({

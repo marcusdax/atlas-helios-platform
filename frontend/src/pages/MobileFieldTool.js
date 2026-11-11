@@ -3,7 +3,6 @@ import { motion } from 'framer-motion';
 import toast from 'react-hot-toast';
 
 const MobileFieldTool = () => {
-  const [activeTab, setActiveTab] = useState('camera');
   const [photos, setPhotos] = useState([]);
   const [assessmentNotes, setAssessmentNotes] = useState('');
   const [propertyInfo, setPropertyInfo] = useState({
@@ -74,7 +73,11 @@ const MobileFieldTool = () => {
       setRecording(!recording);
       if (!recording) {
         // Start recording
+        // The permission prompt is the point of this call; the stream itself is
+        // not used yet because the recorder is still a stub. Released straight
+        // away so the microphone indicator does not stay on.
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream.getTracks().forEach((track) => track.stop());
         // Mock recording - in real implementation, would use MediaRecorder API
         setTimeout(() => {
           setRecording(false);
@@ -382,7 +385,7 @@ const MobileFieldTool = () => {
                     <div className="relative">
                       <img
                         src={photo.url}
-                        alt="Property photo"
+                        alt={`Inspection capture ${photo.id}`}
                         className="w-full h-32 object-cover"
                       />
                       <div className="absolute top-2 right-2">

@@ -18,6 +18,9 @@ const PropertyAssessment = () => {
   useEffect(() => {
     fetchProperties();
     fetchAssessments();
+    // Same as above: the context's fetchers are new objects each render, so
+    // depending on them would fetch forever. This runs once, on mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleCreateAssessment = async (e) => {

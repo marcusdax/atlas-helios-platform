@@ -353,6 +353,26 @@ test('property features drop ungeocoded rows and carry a risk band', () => {
   assert.deepEqual(collection.features[0].geometry.coordinates, [-96.8, 32.7]);
 });
 
+test('a row is readable whether its risk is named damage_probability or score', () => {
+  // The Storm Intelligence page passes raw API rows; the dashboard passes rows
+  // normalised by @atlas/dashboard-data, which calls the same figure `score`.
+  // One map component serves both without either caller reshaping.
+  const raw = toPropertyFeatures([
+    { id: '1', address: '1 A St', latitude: 32.7, longitude: -96.8, damage_probability: 85 }
+  ]);
+  const normalised = toPropertyFeatures([
+    { id: '1', address: '1 A St', latitude: 32.7, longitude: -96.8, score: 85 }
+  ]);
+
+  assert.equal(normalised.features[0].properties.risk, 85);
+  assert.deepEqual(normalised.features[0].properties, raw.features[0].properties);
+
+  // And a row with neither is low risk rather than NaN.
+  const neither = toPropertyFeatures([{ id: '2', address: '2 B St', latitude: 1, longitude: 1 }]);
+  assert.equal(neither.features[0].properties.risk, 0);
+  assert.equal(neither.features[0].properties.band, 'Low');
+});
+
 test('risk bands cover the whole scale', () => {
   assert.equal(bandFor(95).label, 'Severe');
   assert.equal(bandFor(70).label, 'High');

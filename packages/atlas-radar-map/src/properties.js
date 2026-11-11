@@ -32,6 +32,9 @@ const RISK_BANDS = [
   { min: 0, color: '#4cc9f0', label: 'Low' }
 ];
 
+/** The risk figure, whichever of the two names the caller uses for it. */
+const riskOf = (p) => Number(p?.damage_probability ?? p?.score) || 0;
+
 const bandFor = (score) =>
   RISK_BANDS.find((band) => (score || 0) >= band.min) || RISK_BANDS[RISK_BANDS.length - 1];
 
@@ -50,9 +53,14 @@ function toPropertyFeatures(properties) {
           address: p.address,
           city: p.city,
           state: p.state,
-          risk: Number(p.damage_probability) || 0,
+          // `damage_probability` is the raw API column; `score` is what the
+          // dashboard's domain model calls the same figure. Accepting both
+          // lets one map component take rows straight from the API on the
+          // Storm Intelligence page and normalised rows from the dashboard's
+          // data layer, without either caller reshaping for the other.
+          risk: riskOf(p),
           value: Number(p.estimated_value) || 0,
-          band: bandFor(Number(p.damage_probability) || 0).label
+          band: bandFor(riskOf(p)).label
         }
       }))
   };

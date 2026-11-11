@@ -1,0 +1,14 @@
+{
+  "name": "@atlas/dashboard-data",
+  "version": "0.1.0",
+  "description": "Typed dashboard data layer for Atlas & Helios: one domain model fed by REST, WebSocket and local cache, with an explicit LIVE/SYNCING/STALE/DEGRADED/OFFLINE lifecycle.",
+  "main": "src/index.js",
+  "files": ["src", "README.md"],
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
+  "engines": { "node": ">=18" },
+  "keywords": ["dashboard", "data-layer", "state-machine", "offline", "stale-while-revalidate", "websocket"],
+  "license": "MIT",
+  "sideEffects": false
+}

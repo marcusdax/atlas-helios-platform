@@ -3,7 +3,16 @@ import io from 'socket.io-client';
 import { ExclamationTriangleIcon } from '@heroicons/react/24/outline';
 import toast from 'react-hot-toast';
 
-const WebSocketContext = createContext();
+/**
+ * Exported so a consumer can read the socket *optionally*.
+ *
+ * `useWebSocket` throws without a provider, which is correct for a page but
+ * wrong for the data layer: the dashboard's hook is also rendered inside
+ * Storybook and component tests, where there is no socket and no provider, and
+ * a throw there would mean every story had to be wrapped in real WebSocket
+ * infrastructure just to render a card.
+ */
+export const WebSocketContext = createContext();
 
 export const useWebSocket = () => {
   const context = useContext(WebSocketContext);

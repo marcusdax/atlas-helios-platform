@@ -1,12 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import toast from 'react-hot-toast';
 import { useStorm } from '../contexts/StormContext';
 
 const StormIntelligence = () => {
   const { storms, loading, fetchStorms, subscribeToAlerts } = useStorm();
   const [selectedStorm, setSelectedStorm] = useState(null);
-  const [alerts, setAlerts] = useState([]);
   const [filters, setFilters] = useState({
     severity: 'all',
     region: 'all',
@@ -16,6 +14,10 @@ const StormIntelligence = () => {
   useEffect(() => {
     fetchStorms(filters);
     subscribeToAlerts();
+    // The context's functions are recreated on every provider render, so
+    // listing them here would refetch in a loop. The filters are what should
+    // trigger a refetch.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters]);
 
   const handleStormSelect = (storm) => {
