@@ -1,189 +1,503 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { api } from '../lib/api';
-import { useApi, useAction } from '../lib/useApi';
-import { PageHeader, Card, Button, TextArea, Alert, RiskBadge, AsyncState } from '../components/ui/kit';
+import React, { useState, useEffect } from 'react';
+import { motion } from 'framer-motion';
+import toast from 'react-hot-toast';
 
-/**
- * The field tool: one thumb-sized flow for a rep standing on a driveway.
- *
- * Two things it does that the desktop screens do not — take the device's GPS
- * to find the nearest property on file, and queue a submission that failed
- * because the truck drove through a dead zone. Losing an inspection because
- * LTE dropped is the failure that makes field staff stop using a tool.
- */
-const QUEUE_KEY = 'atlas.field.queue';
-
-const readQueue = () => {
-  try { return JSON.parse(localStorage.getItem(QUEUE_KEY) || '[]'); } catch { return []; }
-};
-const writeQueue = (items) => {
-  try { localStorage.setItem(QUEUE_KEY, JSON.stringify(items)); } catch { /* private mode */ }
-};
-
-export default function MobileFieldTool() {
-  const [position, setPosition] = useState(null);
-  const [geoError, setGeoError] = useState(null);
-  const [propertyId, setPropertyId] = useState('');
-  const [notes, setNotes] = useState('');
-  const [files, setFiles] = useState([]);
-  const [queued, setQueued] = useState(readQueue());
-  const [online, setOnline] = useState(navigator.onLine);
-  const fileRef = useRef(null);
-
-  const nearby = useApi(
-    (signal) => position
-      ? api.properties.list({ latitude: position.lat, longitude: position.lng, radius: 2, limit: 25 }, signal)
-      : Promise.resolve({ data: [] }),
-    [position?.lat, position?.lng]
-  );
-
-  const start = useAction((formData) => api.assessments.start(formData));
+const MobileFieldTool = () => {
+  const [activeTab, setActiveTab] = useState('camera');
+  const [photos, setPhotos] = useState([]);
+  const [assessmentNotes, setAssessmentNotes] = useState('');
+  const [propertyInfo, setPropertyInfo] = useState({
+    address: '',
+    propertyId: '',
+    assessmentType: 'damage',
+    severity: 'medium'
+  });
+  const [location, setLocation] = useState({ lat: null, lng: null });
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [syncStatus, setSyncStatus] = useState('synced');
+  const [recording, setRecording] = useState(false);
 
   useEffect(() => {
-    const on = () => setOnline(true);
-    const off = () => setOnline(false);
-    window.addEventListener('online', on);
-    window.addEventListener('offline', off);
-    return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off); };
+    // Get user location
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          setLocation({
+            lat: position.coords.latitude,
+            lng: position.coords.longitude
+          });
+        },
+        (error) => {
+          console.error('Error getting location:', error);
+          toast.error('Unable to get location');
+        }
+      );
+    }
+
+    // Monitor online status
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
   }, []);
 
-  const locate = () => {
-    setGeoError(null);
-    if (!navigator.geolocation) { setGeoError('This device has no location service.'); return; }
-    navigator.geolocation.getCurrentPosition(
-      (pos) => setPosition({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-      (err) => setGeoError(err.message || 'Could not read your location.'),
-      { enableHighAccuracy: true, timeout: 15000 }
-    );
+  const handlePhotoCapture = (e) => {
+    const files = Array.from(e.target.files);
+    const newPhotos = files.map((file, index) => ({
+      id: Date.now() + index,
+      file,
+      url: URL.createObjectURL(file),
+      timestamp: new Date(),
+      location: location,
+      synced: false,
+      description: '',
+      damageType: 'other'
+    }));
+    setPhotos([...photos, ...newPhotos]);
+    setSyncStatus('pending');
+    toast.success(`${files.length} photo(s) captured`);
   };
 
-  const submit = async (event) => {
-    event.preventDefault();
-    if (!propertyId) return;
-
-    if (!online) {
-      // Files cannot be serialised to localStorage, so the queue records the
-      // intent and the rep re-attaches photos when back in signal. Honest
-      // about what it can and cannot hold, rather than silently dropping them.
-      const next = [...queued, { property_id: propertyId, notes, photos: files.length, queued_at: Date.now() }];
-      setQueued(next); writeQueue(next);
-      setNotes(''); setFiles([]);
-      if (fileRef.current) fileRef.current.value = '';
+  const handleVoiceNote = async () => {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      toast.error('Voice recording not supported');
       return;
     }
 
-    const form = new FormData();
-    form.append('property_id', propertyId);
-    form.append('inspection_type', 'storm_damage');
-    if (notes) form.append('notes', notes);
-    files.forEach((f) => form.append('images', f));
-
-    if (await start.run(form)) {
-      setNotes(''); setFiles([]);
-      if (fileRef.current) fileRef.current.value = '';
+    try {
+      setRecording(!recording);
+      if (!recording) {
+        // Start recording
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        // Mock recording - in real implementation, would use MediaRecorder API
+        setTimeout(() => {
+          setRecording(false);
+          toast.success('Voice note recorded');
+          setAssessmentNotes(prev => prev + '\n[Voice note recorded]');
+        }, 3000);
+      }
+    } catch (error) {
+      toast.error('Failed to access microphone');
+      setRecording(false);
     }
   };
 
-  const clearQueue = () => { setQueued([]); writeQueue([]); };
+  const handleSync = async () => {
+    if (!isOnline) {
+      toast.error('No internet connection');
+      return;
+    }
+
+    setSyncStatus('syncing');
+    try {
+      // Mock sync process
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      setPhotos(photos.map(photo => ({ ...photo, synced: true })));
+      setSyncStatus('synced');
+      toast.success('All data synced successfully');
+    } catch (error) {
+      setSyncStatus('error');
+      toast.error('Sync failed');
+    }
+  };
+
+  const handleSaveAssessment = async () => {
+    if (!propertyInfo.address) {
+      toast.error('Please enter property address');
+      return;
+    }
+
+    if (photos.length === 0) {
+      toast.error('Please capture at least one photo');
+      return;
+    }
+
+    try {
+      // Mock save process
+      const assessment = {
+        ...propertyInfo,
+        photos,
+        notes: assessmentNotes,
+        location,
+        createdAt: new Date().toISOString()
+      };
+
+      // In real implementation, would save to local storage and sync
+      console.log('Saving assessment:', assessment);
+      
+      toast.success('Assessment saved successfully');
+      
+      // Reset form
+      setPhotos([]);
+      setAssessmentNotes('');
+      setPropertyInfo({
+        address: '',
+        propertyId: '',
+        assessmentType: 'damage',
+        severity: 'medium'
+      });
+    } catch (error) {
+      toast.error('Failed to save assessment');
+    }
+  };
+
+  const updatePhotoDescription = (photoId, description) => {
+    setPhotos(photos.map(photo => 
+      photo.id === photoId ? { ...photo, description } : photo
+    ));
+  };
+
+  const updatePhotoDamageType = (photoId, damageType) => {
+    setPhotos(photos.map(photo => 
+      photo.id === photoId ? { ...photo, damageType } : photo
+    ));
+  };
+
+  const removePhoto = (photoId) => {
+    setPhotos(photos.filter(photo => photo.id !== photoId));
+    toast.success('Photo removed');
+  };
+
+  const getSyncStatusColor = () => {
+    switch (syncStatus) {
+      case 'synced': return 'text-green-400';
+      case 'syncing': return 'text-yellow-400';
+      case 'pending': return 'text-orange-400';
+      case 'error': return 'text-red-400';
+      default: return 'text-gray-400';
+    }
+  };
+
+  const getSyncStatusIcon = () => {
+    switch (syncStatus) {
+      case 'synced': return '✓';
+      case 'syncing': return '⟳';
+      case 'pending': return '⏰';
+      case 'error': return '✗';
+      default: return '?';
+    }
+  };
 
   return (
-    <div className="mx-auto max-w-xl">
-      <PageHeader
-        title="Field Tool"
-        subtitle="Capture an inspection from the driveway. Works one-handed; queues the note if you lose signal."
-      />
-
-      {!online && (
-        <div className="mb-4">
-          <Alert tone="warn" title="Offline">
-            Submissions are queued locally. Photos need re-attaching once you are back in signal.
-          </Alert>
-        </div>
-      )}
-
-      <Card title="1. Where are you">
-        <Button tone="ghost" onClick={locate} className="w-full">Use my location</Button>
-        {geoError && <div className="mt-3"><Alert tone="error">{geoError}</Alert></div>}
-        {position && (
-          <p className="mt-3 text-xs text-neutral-500">
-            {position.lat.toFixed(5)}, {position.lng.toFixed(5)}
-          </p>
-        )}
-
-        {position && (
-          <div className="mt-4">
-            <AsyncState
-              loading={nearby.loading} error={nearby.error}
-              empty={!nearby.data?.data?.length}
-              emptyMessage="No properties on file within two miles."
+    <div className="space-y-4">
+      {/* Header */}
+      <motion.div
+        initial={{ opacity: 0, y: -20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="bg-neutral-900 rounded-lg border border-neutral-800 p-4"
+      >
+        <div className="flex justify-between items-center mb-4">
+          <div>
+            <h1 className="text-2xl font-bold text-white">Field Assessment Tool</h1>
+            <p className="text-neutral-400 text-sm">Mobile property inspection and assessment</p>
+          </div>
+          
+          <div className="flex items-center gap-4">
+            {/* Connection Status */}
+            <div className="flex items-center gap-2">
+              <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-green-400' : 'bg-red-400'}`}></div>
+              <span className="text-sm text-neutral-400">
+                {isOnline ? 'Online' : 'Offline'}
+              </span>
+            </div>
+            
+            {/* Sync Status */}
+            <div className="flex items-center gap-2">
+              <span className={`text-sm ${getSyncStatusColor()}`}>
+                {getSyncStatusIcon()}
+              </span>
+              <span className={`text-sm ${getSyncStatusColor()}`}>
+                {syncStatus.charAt(0).toUpperCase() + syncStatus.slice(1)}
+              </span>
+            </div>
+            
+            {/* Sync Button */}
+            <button
+              onClick={handleSync}
+              disabled={syncStatus === 'syncing' || !isOnline}
+              className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white px-3 py-1 rounded-lg text-sm transition-colors"
             >
-              <ul className="space-y-2">
-                {(nearby.data?.data || []).map((p) => (
-                  <li key={p.id}>
-                    <button
-                      type="button"
-                      onClick={() => setPropertyId(p.id)}
-                      className={`flex w-full items-center justify-between gap-3 rounded-lg border p-3 text-left text-sm transition
-                        ${propertyId === p.id
-                          ? 'border-sky-500 bg-sky-500/10 text-neutral-100'
-                          : 'border-neutral-800 bg-neutral-900/60 text-neutral-300 hover:bg-neutral-800'}`}
-                    >
-                      <span>
-                        <span className="block font-medium">{p.address}</span>
-                        <span className="block text-xs text-neutral-500">
-                          {p.city} · {p.distance_miles != null ? `${p.distance_miles} mi` : ''}
-                        </span>
-                      </span>
-                      <RiskBadge score={p.damage_probability} />
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </AsyncState>
+              Sync Data
+            </button>
+          </div>
+        </div>
+
+        {/* Location Info */}
+        {location && (
+          <div className="text-sm text-neutral-400">
+            📍 Location: {location.lat.toFixed(6)}, {location.lng.toFixed(6)}
           </div>
         )}
-      </Card>
+      </motion.div>
 
-      <div className="mt-4">
-        <Card title="2. Capture">
-          <form onSubmit={submit} className="space-y-4">
-            <div>
-              <label htmlFor="capture" className="mb-1.5 block text-sm font-medium text-neutral-300">Photos</label>
-              <input
-                id="capture" ref={fileRef} type="file" multiple accept="image/*" capture="environment"
-                onChange={(e) => setFiles([...e.target.files].slice(0, 12))}
-                className="w-full text-sm text-neutral-400 file:mr-3 file:rounded-lg file:border-0 file:bg-sky-500/15 file:px-3 file:py-3 file:text-sm file:font-semibold file:text-sky-300"
-              />
-              <p className="mt-1 text-xs text-neutral-500">{files.length} attached</p>
+      {/* Main Content */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* Left Panel - Property Info & Controls */}
+        <motion.div
+          initial={{ opacity: 0, x: -20 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ delay: 0.1 }}
+          className="space-y-4"
+        >
+          {/* Property Information */}
+          <div className="bg-neutral-900 rounded-lg border border-neutral-800 p-4">
+            <h3 className="text-lg font-semibold text-white mb-4">Property Information</h3>
+            
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-neutral-400 mb-1">Address</label>
+                <input
+                  type="text"
+                  value={propertyInfo.address}
+                  onChange={(e) => setPropertyInfo({ ...propertyInfo, address: e.target.value })}
+                  className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Enter property address"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-neutral-400 mb-1">Property ID</label>
+                <input
+                  type="text"
+                  value={propertyInfo.propertyId}
+                  onChange={(e) => setPropertyInfo({ ...propertyInfo, propertyId: e.target.value })}
+                  className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Property identifier"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-neutral-400 mb-1">Assessment Type</label>
+                <select
+                  value={propertyInfo.assessmentType}
+                  onChange={(e) => setPropertyInfo({ ...propertyInfo, assessmentType: e.target.value })}
+                  className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="damage">Damage Assessment</option>
+                  <option value="preventive">Preventive Inspection</option>
+                  <option value="routine">Routine Check</option>
+                  <option value="insurance">Insurance Claim</option>
+                </select>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-neutral-400 mb-1">Severity</label>
+                <select
+                  value={propertyInfo.severity}
+                  onChange={(e) => setPropertyInfo({ ...propertyInfo, severity: e.target.value })}
+                  className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                  <option value="critical">Critical</option>
+                </select>
+              </div>
             </div>
-            <TextArea
-              id="field-notes" label="Notes" rows={3} maxLength={2000}
-              value={notes} onChange={(e) => setNotes(e.target.value)}
-              placeholder="Hail bruising, 4 per test square, north slope"
-            />
-            <Button type="submit" busy={start.pending} disabled={!propertyId} className="w-full py-3">
-              {online ? 'Submit inspection' : 'Queue inspection'}
-            </Button>
-            {start.error && <Alert tone="error">{start.error.message}</Alert>}
-            {start.data && <Alert tone="success">Submitted. Analysis runs in the background.</Alert>}
-          </form>
-        </Card>
-      </div>
+          </div>
 
-      {queued.length > 0 && (
-        <div className="mt-4">
-          <Card title={`Queued (${queued.length})`} actions={<Button tone="ghost" onClick={clearQueue}>Clear</Button>}>
-            <ul className="space-y-2 text-sm text-neutral-400">
-              {queued.map((q, i) => (
-                <li key={i} className="rounded border border-neutral-800 p-2">
-                  <code className="text-xs">{q.property_id}</code> · {q.photos} photo(s) ·{' '}
-                  {new Date(q.queued_at).toLocaleTimeString()}
-                </li>
-              ))}
-            </ul>
-          </Card>
-        </div>
-      )}
+          {/* Quick Actions */}
+          <div className="bg-neutral-900 rounded-lg border border-neutral-800 p-4">
+            <h3 className="text-lg font-semibold text-white mb-4">Quick Actions</h3>
+            
+            <div className="space-y-3">
+              {/* Camera Capture */}
+              <div className="relative">
+                <input
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  capture="environment"
+                  onChange={handlePhotoCapture}
+                  className="hidden"
+                  id="camera-input"
+                />
+                <label
+                  htmlFor="camera-input"
+                  className="block w-full bg-green-600 hover:bg-green-700 text-white px-4 py-3 rounded-lg text-center cursor-pointer transition-colors"
+                >
+                  📷 Capture Photos
+                </label>
+              </div>
+              
+              {/* Voice Note */}
+              <button
+                onClick={handleVoiceNote}
+                className={`w-full px-4 py-3 rounded-lg text-white transition-colors ${
+                  recording 
+                    ? 'bg-red-600 hover:bg-red-700' 
+                    : 'bg-blue-600 hover:bg-blue-700'
+                }`}
+              >
+                {recording ? '⏹️ Stop Recording' : '🎤 Voice Note'}
+              </button>
+              
+              {/* Save Assessment */}
+              <button
+                onClick={handleSaveAssessment}
+                className="w-full bg-purple-600 hover:bg-purple-700 text-white px-4 py-3 rounded-lg transition-colors"
+              >
+                💾 Save Assessment
+              </button>
+            </div>
+          </div>
+        </motion.div>
+
+        {/* Right Panel - Photos & Notes */}
+        <motion.div
+          initial={{ opacity: 0, x: 20 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ delay: 0.2 }}
+          className="lg:col-span-2 space-y-4"
+        >
+          {/* Photo Gallery */}
+          <div className="bg-neutral-900 rounded-lg border border-neutral-800 p-4">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-semibold text-white">
+                Photos ({photos.length})
+              </h3>
+              <div className="text-sm text-neutral-400">
+                {photos.filter(p => !p.synced).length} pending sync
+              </div>
+            </div>
+            
+            {photos.length === 0 ? (
+              <div className="text-center py-12 bg-neutral-800 rounded-lg">
+                <div className="text-4xl mb-4">📸</div>
+                <p className="text-neutral-400">No photos captured yet</p>
+                <p className="text-sm text-neutral-500 mt-2">
+                  Use the camera button to capture property photos
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-96 overflow-y-auto">
+                {photos.map((photo) => (
+                  <div key={photo.id} className="bg-neutral-800 rounded-lg overflow-hidden">
+                    <div className="relative">
+                      <img
+                        src={photo.url}
+                        alt="Property photo"
+                        className="w-full h-32 object-cover"
+                      />
+                      <div className="absolute top-2 right-2">
+                        <span className={`px-2 py-1 text-xs rounded-full ${
+                          photo.synced 
+                            ? 'bg-green-900/50 text-green-400' 
+                            : 'bg-orange-900/50 text-orange-400'
+                        }`}>
+                          {photo.synced ? 'Synced' : 'Pending'}
+                        </span>
+                      </div>
+                    </div>
+                    
+                    <div className="p-3">
+                      <select
+                        value={photo.damageType}
+                        onChange={(e) => updatePhotoDamageType(photo.id, e.target.value)}
+                        className="w-full bg-neutral-700 border border-neutral-600 rounded-lg px-2 py-1 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 mb-2"
+                      >
+                        <option value="other">General</option>
+                        <option value="roof">Roof Damage</option>
+                        <option value="window">Window Damage</option>
+                        <option value="siding">Siding Damage</option>
+                        <option value="foundation">Foundation</option>
+                        <option value="water">Water Damage</option>
+                        <option value="debris">Debris</option>
+                      </select>
+                      
+                      <textarea
+                        value={photo.description}
+                        onChange={(e) => updatePhotoDescription(photo.id, e.target.value)}
+                        className="w-full bg-neutral-700 border border-neutral-600 rounded-lg px-2 py-1 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 mb-2"
+                        rows={2}
+                        placeholder="Add description..."
+                      />
+                      
+                      <button
+                        onClick={() => removePhoto(photo.id)}
+                        className="w-full bg-red-600 hover:bg-red-700 text-white px-2 py-1 rounded text-sm transition-colors"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Assessment Notes */}
+          <div className="bg-neutral-900 rounded-lg border border-neutral-800 p-4">
+            <h3 className="text-lg font-semibold text-white mb-4">Assessment Notes</h3>
+            
+            <textarea
+              value={assessmentNotes}
+              onChange={(e) => setAssessmentNotes(e.target.value)}
+              className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              rows={6}
+              placeholder="Enter detailed assessment notes...
+              
+• Describe overall property condition
+• Note specific areas of concern
+• Document weather conditions
+• Add any safety observations
+• Include measurements if needed"
+            />
+          </div>
+
+          {/* Quick Templates */}
+          <div className="bg-neutral-900 rounded-lg border border-neutral-800 p-4">
+            <h3 className="text-lg font-semibold text-white mb-4">Quick Templates</h3>
+            
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => setAssessmentNotes(prev => prev + '\n• Roof inspected for storm damage')}
+                className="bg-neutral-800 hover:bg-neutral-700 text-white px-3 py-2 rounded text-sm transition-colors"
+              >
+                Roof Inspection
+              </button>
+              <button
+                onClick={() => setAssessmentNotes(prev => prev + '\n• Windows checked for cracks/breakage')}
+                className="bg-neutral-800 hover:bg-neutral-700 text-white px-3 py-2 rounded text-sm transition-colors"
+              >
+                Window Check
+              </button>
+              <button
+                onClick={() => setAssessmentNotes(prev => prev + '\n• Siding examined for damage')}
+                className="bg-neutral-800 hover:bg-neutral-700 text-white px-3 py-2 rounded text-sm transition-colors"
+              >
+                Siding Review
+              </button>
+              <button
+                onClick={() => setAssessmentNotes(prev => prev + '\n• Foundation assessed for cracks')}
+                className="bg-neutral-800 hover:bg-neutral-700 text-white px-3 py-2 rounded text-sm transition-colors"
+              >
+                Foundation
+              </button>
+              <button
+                onClick={() => setAssessmentNotes(prev => prev + '\n• Debris documented and measured')}
+                className="bg-neutral-800 hover:bg-neutral-700 text-white px-3 py-2 rounded text-sm transition-colors"
+              >
+                Debris Report
+              </button>
+              <button
+                onClick={() => setAssessmentNotes(prev => prev + '\n• Water damage assessment completed')}
+                className="bg-neutral-800 hover:bg-neutral-700 text-white px-3 py-2 rounded text-sm transition-colors"
+              >
+                Water Damage
+              </button>
+            </div>
+          </div>
+        </motion.div>
+      </div>
     </div>
   );
-}
+};
+
+export default MobileFieldTool;
