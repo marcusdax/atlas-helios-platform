@@ -6,6 +6,15 @@ This document records the proposed visual/system redesign, architecture, and imp
 
 Repository: https://github.com/marcusdax/atlas-helios-platform
 
+> **Status note.** Roadmap item 7 — "Replace mock dashboard state with a proper
+> data/query architecture" — and the "Critical engineering issue" section below
+> are now implemented. The mock dataset is out of `fetchDashboardData()`, which
+> no longer exists, and the LIVE/SYNCING/STALE/DEGRADED/OFFLINE lifecycle this
+> document asked for is a derived, tested state machine rather than a
+> convention. See [`dashboard-data-layer.md`](./dashboard-data-layer.md) for the
+> contract, and its final section for the mock data that remains elsewhere in
+> the app.
+
 ---
 
 ## Executive summary

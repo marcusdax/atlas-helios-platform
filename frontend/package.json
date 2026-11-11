@@ -29,14 +29,17 @@
     "workbox-routing": "^6.5.4",
     "workbox-strategies": "^6.5.4",
     "maplibre-gl": "^4.7.1",
-    "@atlas/radar-map": "0.1.0"
+    "@atlas/radar-map": "0.1.0",
+    "@atlas/dashboard-data": "0.1.0"
   },
   "scripts": {
     "start": "react-scripts start",
     "build": "react-scripts build",
     "test": "react-scripts test",
     "eject": "react-scripts eject",
-    "build:sw": "workbox generateSW"
+    "build:sw": "workbox generateSW",
+    "storybook": "storybook dev -p 6006",
+    "build-storybook": "storybook build"
   },
   "eslintConfig": {
     "extends": [
