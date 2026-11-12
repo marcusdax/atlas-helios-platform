@@ -7,7 +7,8 @@ const db = require('../../config/database');
 const logger = require('../utils/logger');
 const StormService = require('../services/StormService');
 const {
-  Joi, validate, paginate, meta, notFoundIf, paginationSchema, coordinateSchema, radiusBox
+  Joi, validate, paginate, meta, scopeToCompany, notFoundIf, paginationSchema,
+  coordinateSchema, radiusBox
 } = require('./_helpers');
 
 const router = express.Router();
@@ -59,6 +60,57 @@ router.get('/', optionalAuth, validate(listQuery, 'query'), asyncHandler(async (
  */
 router.get('/regions', optionalAuth, asyncHandler(async (req, res) => {
   res.json({ data: await db('monitoring_regions').where('active', true).orderBy('name') });
+}));
+
+/**
+ * @route GET /api/storms/alerts/user
+ * @desc  Storm alerts raised for the caller's company. Declared before /:id.
+ *
+ * This seeds the alert list the dashboard then keeps live over the `storm_alert`
+ * WebSocket event, so it returns the same storm_alerts rows that event emits.
+ * It is deliberately not /api/radar/alerts: that endpoint proxies the public NWS
+ * GeoJSON feed - national weather data in a different shape - rather than the
+ * alerts Atlas raised against a company's own monitoring regions.
+ *
+ * storm_alerts carries no company column, so it inherits scope from the region
+ * its storm was detected in, which POST /api/storms/track registers per company.
+ * The join is therefore the tenancy boundary, the same way an assessment
+ * inherits its scope from the property. An alert whose storm belongs to no
+ * region is attributable to no company, and the inner join drops it rather than
+ * showing it to every tenant.
+ */
+router.get('/alerts/user', authMiddleware, validate(paginationSchema.keys({
+  acknowledged: Joi.boolean(),
+  since: Joi.date().iso()
+}), 'query'), asyncHandler(async (req, res) => {
+  const { page, limit, offset } = paginate(req.query);
+
+  const base = () => {
+    let query = db('storm_alerts as a')
+      .join('storm_events as e', 'e.id', 'a.storm_event_id')
+      .join('monitoring_regions as r', 'r.id', 'e.region_id')
+      .modify((qb) => scopeToCompany(qb, req.user, 'r.company_id'));
+
+    if (req.query.acknowledged !== undefined) {
+      query = query.where('a.acknowledged', req.query.acknowledged);
+    }
+    if (req.query.since) query = query.where('a.created_at', '>=', req.query.since);
+    return query;
+  };
+
+  const [{ count }] = await base().count({ count: 'a.id' });
+  const data = await base()
+    .select(
+      'a.*',
+      'e.event_type as storm_event_type',
+      'e.severity as storm_severity',
+      'e.region_name as storm_region_name',
+      'e.status as storm_status'
+    )
+    .orderBy('a.created_at', req.query.order)
+    .limit(limit).offset(offset);
+
+  res.json({ data, meta: meta(Number(count), { page, limit }) });
 }));
 
 /**
