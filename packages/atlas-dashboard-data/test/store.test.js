@@ -80,6 +80,24 @@ test('a store starts SYNCING with a complete, zeroed model', () => {
   assert.deepEqual(view.activity, []);
   assert.equal(view.fetchedAt, null);
   assert.equal(view.fromCache, false);
+
+  // Every field a component reads has to exist from the first render. The bug
+  // this guards: `forecast` and `mapProperties` were added to the snapshot and
+  // not to the view, so the chart and the map both got `undefined` and only a
+  // test caught it.
+  for (const key of ['activity', 'priorityProperties', 'mapProperties', 'forecast']) {
+    assert.ok(Array.isArray(view[key]), `view.${key} must be an array from the start`);
+  }
+  assert.equal(view.forecastSource, null);
+});
+
+test('the view exposes every field of the snapshot it is built from', () => {
+  // Structural, so the next field added to the model cannot be left out of the
+  // view the way these two were.
+  const store = new DashboardStore({ gateway: gateway() });
+  for (const key of Object.keys(store.snapshot)) {
+    assert.ok(key in store.getView(), `snapshot.${key} is missing from the view`);
+  }
 });
 
 test('a full refresh with the socket up is LIVE and carries every lane', async () => {

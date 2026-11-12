@@ -7,6 +7,10 @@ yarn-error.log*
 # Production builds
 /frontend/build
 /backend/dist
+/frontend/storybook-static
+
+# Local SQLite development database (DB_CLIENT=sqlite3)
+/backend/dev.sqlite3
 
 # Environment variables
 .env

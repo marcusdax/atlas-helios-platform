@@ -1,18 +1,17 @@
-require('dotenv').config({ path: __dirname + '/.env' });
+/**
+ * Knex CLI config — the same settings the server runs on.
+ *
+ * This file used to carry its own copy: `development` only, Postgres only, and
+ * a relative `./migrations` directory. That meant `npm run migrate` could
+ * point at a different database than the app reads, silently, and it resolved
+ * the migrations folder against whatever directory the command was run from -
+ * the exact bug `config/database.js` documents having fixed. It also had no
+ * `test` or `production` entry, so `knex migrate:latest` in either crashed.
+ *
+ * `config/db-config` is deliberately the import rather than
+ * `config/database`: the latter opens a connection pool on require, which the
+ * CLI does not need and which would stop the process from exiting.
+ */
+require('dotenv').config({ path: `${__dirname}/.env` });
 
-module.exports = {
-  development: {
-    client: 'postgresql',
-    connection: {
-      host: process.env.DB_HOST || 'localhost',
-      port: process.env.DB_PORT || 5432,
-      database: process.env.DB_NAME || 'atlas_helios_dev',
-      user: process.env.DB_USER || 'postgres',
-      password: process.env.DB_PASSWORD || 'password'
-    },
-    migrations: {
-      directory: './migrations',
-      tableName: 'knex_migrations'
-    }
-  }
-};
+module.exports = require('./config/db-config');

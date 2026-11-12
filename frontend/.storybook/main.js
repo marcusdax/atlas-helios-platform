@@ -1,18 +1,30 @@
 /**
  * Storybook configuration.
  *
- * Storybook is not in `package.json`: adding ~400MB of unpinned devDependencies
- * to a workspace whose Docker build runs `npm ci` is a change that deserves its
- * own review, and the thing this task actually needed - a way to render every
- * data state without a network - is the mock provider, which works in plain
- * component tests too. The install command is one line in frontend/README.md.
- *
- * The stories and this config are here so that install is the only step left.
+ * The point of Storybook here is the five-state gallery: every panel on the
+ * dashboard renders differently for LIVE / SYNCING / STALE / DEGRADED /
+ * OFFLINE, and the only way to know those five stay distinguishable from each
+ * other is to see them side by side. The fixtures behind the stories are the
+ * same ones the component tests use, and the data layer's own suite checks
+ * each one derives the state it claims - so a story cannot drift into showing
+ * something the app would call something else.
  */
 module.exports = {
   stories: ['../src/**/*.stories.@(js|jsx|mjs|ts|tsx)'],
 
   addons: [
+    /*
+      The CRA preset, which has to come first.
+
+      Storybook notices `react-scripts` is installed and switches its own babel
+      handling off, so without this the webpack chain carries no babel-loader at
+      all and the build dies on the first line of JSX in every story. This
+      preset hands Storybook Create React App's own webpack and babel config
+      instead - which is better than a second config anyway, because a story
+      then compiles exactly the way the component does, Tailwind and PostCSS
+      included.
+    */
+    '@storybook/preset-create-react-app',
     '@storybook/addon-essentials',
     // The data states are distinguished by more than colour, and that claim is
     // worth checking rather than asserting.
@@ -24,12 +36,20 @@ module.exports = {
     options: {}
   },
 
-  // CRA aliases nothing unusual, but the workspace packages are symlinks and
-  // webpack needs to follow them rather than treat them as externals.
   webpackFinal: async (config) => ({
     ...config,
-    resolve: { ...config.resolve, symlinks: false }
+    resolve: {
+      ...config.resolve,
+      // The workspace packages are symlinks; webpack has to follow them rather
+      // than treat them as externals.
+      symlinks: false
+    }
   }),
 
-  docs: { autodocs: 'tag' }
+  // react-docgen parses components to build the autodocs tables. Its default
+  // parser does not read JSX in a `.js` file, which is how this whole app is
+  // written, so point it at the babel-backed one.
+  typescript: { reactDocgen: 'react-docgen' },
+
+  docs: { autodocs: true }
 };

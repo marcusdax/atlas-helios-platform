@@ -31,6 +31,41 @@ class NOAAWeatherService {
     });
 
     this.isInitialized = false;
+
+    /**
+     * Whether a failed upstream call may answer with fabricated data.
+     *
+     * Every read below used to fall back to a mock generator on any error, and
+     * returned it through the same field as a real response - so a dashboard
+     * could not tell a 24-hour forecast from a sine wave, and `/alerts` could
+     * serve an invented "Severe Thunderstorm Warning ... Take shelter
+     * immediately" that no meteorologist had issued. That is the worst version
+     * of the defect this platform exists to avoid.
+     *
+     * Now a failure is reported as a failure. Demos that want the old
+     * behaviour opt in explicitly, and even then the payload is stamped
+     * `source: 'mock'` so a caller can label it. Alerts never fabricate, opt-in
+     * or not: a warning telling a person to take shelter has to be real.
+     */
+    this.allowMock = String(process.env.WEATHER_ALLOW_MOCK || '').toLowerCase() === 'true';
+  }
+
+  /** An upstream failure, with a stable code the frontend can branch on. */
+  unavailable(what, cause) {
+    const error = new Error(`${what} is unavailable`);
+    error.code = 'WEATHER_UNAVAILABLE';
+    error.statusCode = 503;
+    error.cause = cause;
+    return error;
+  }
+
+  /** Stamp a payload with where it came from, so no caller has to guess. */
+  static fromNws(payload) {
+    return { ...payload, source: 'nws' };
+  }
+
+  static fromMock(payload) {
+    return { ...payload, source: 'mock' };
   }
 
   /**
@@ -72,14 +107,17 @@ class NOAAWeatherService {
       const gridPoint = await this.getGridPoint(lat, lng);
       if (!gridPoint?.properties?.forecast) {
         logger.warn(`No grid point forecast available for ${lat}, ${lng}`);
-        return this.getMockForecast();
+        if (!this.allowMock) throw this.unavailable('Forecast');
+        return NOAAWeatherService.fromMock(this.getMockForecast());
       }
 
       const response = await this.httpClient.get(gridPoint.properties.forecast);
-      return response.data;
+      return NOAAWeatherService.fromNws(response.data);
     } catch (error) {
+      if (error.code === 'WEATHER_UNAVAILABLE') throw error;
       logger.error(`Error getting forecast for ${lat}, ${lng}:`, error.message);
-      return this.getMockForecast();
+      if (!this.allowMock) throw this.unavailable('Forecast', error.message);
+      return NOAAWeatherService.fromMock(this.getMockForecast());
     }
   }
 
@@ -94,14 +132,17 @@ class NOAAWeatherService {
       const gridPoint = await this.getGridPoint(lat, lng);
       if (!gridPoint?.properties?.forecastHourly) {
         logger.warn(`No hourly forecast available for ${lat}, ${lng}`);
-        return this.getMockHourlyForecast();
+        if (!this.allowMock) throw this.unavailable('Hourly forecast');
+        return NOAAWeatherService.fromMock(this.getMockHourlyForecast());
       }
 
       const response = await this.httpClient.get(gridPoint.properties.forecastHourly);
-      return response.data;
+      return NOAAWeatherService.fromNws(response.data);
     } catch (error) {
+      if (error.code === 'WEATHER_UNAVAILABLE') throw error;
       logger.error(`Error getting hourly forecast for ${lat}, ${lng}:`, error.message);
-      return this.getMockHourlyForecast();
+      if (!this.allowMock) throw this.unavailable('Hourly forecast', error.message);
+      return NOAAWeatherService.fromMock(this.getMockHourlyForecast());
     }
   }
 
@@ -143,11 +184,14 @@ class NOAAWeatherService {
         `${this.baseUrl}/alerts/active`
       );
       
-      this.cache.set(cacheKey, response.data, 60); // Cache for 1 minute
-      return response.data;
+      const payload = NOAAWeatherService.fromNws(response.data);
+      this.cache.set(cacheKey, payload, 60); // Cache for 1 minute
+      return payload;
     } catch (error) {
       logger.error('Error getting active alerts:', error.message);
-      return this.getMockAlerts();
+      // No mock gate here on purpose. An invented warning that tells someone to
+      // take shelter is not a degraded experience, it is a hazard.
+      throw this.unavailable('Weather alert feed', error.message);
     }
   }
 
@@ -170,10 +214,10 @@ class NOAAWeatherService {
         }
       );
       
-      return response.data;
+      return NOAAWeatherService.fromNws(response.data);
     } catch (error) {
       logger.error(`Error getting area alerts for ${lat}, ${lng}:`, error.message);
-      return this.getMockAlerts();
+      throw this.unavailable('Weather alert feed', error.message);
     }
   }
 
@@ -268,11 +312,16 @@ class NOAAWeatherService {
           expires: alert.properties.expires
         })),
         isSevere: severeConditions.length > 0 || activeAlerts.length > 0,
+        source: forecast?.source === 'nws' && alerts?.source === 'nws' ? 'nws' : 'mixed',
         timestamp: new Date().toISOString()
       };
     } catch (error) {
+      if (error.code === 'WEATHER_UNAVAILABLE') throw error;
       logger.error(`Error checking severe weather for ${lat}, ${lng}:`, error.message);
-      return this.getMockSevereWeather(lat, lng);
+      // `isSevere: false` from a fabricated payload is the dangerous direction
+      // of this error: it reads as an all-clear nobody checked.
+      if (!this.allowMock) throw this.unavailable('Severe weather check', error.message);
+      return NOAAWeatherService.fromMock(this.getMockSevereWeather(lat, lng));
     }
   }
 

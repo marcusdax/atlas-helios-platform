@@ -32,7 +32,15 @@ const payloads = {
   },
   storms: { meta: { total: 2 }, data: [] },
   assessments: { meta: { total: 18 }, data: [] },
-  alerts: { meta: { count: 3 }, features: [] }
+  alerts: { meta: { count: 3 }, features: [] },
+  forecast: {
+    source: 'nws',
+    properties: {
+      periods: [
+        { startTime: '2026-03-14T18:00:00Z', temperature: 71, windSpeed: '10 to 15 mph', probabilityOfPrecipitation: { value: 40 }, shortForecast: 'Showers Likely' }
+      ]
+    }
+  }
 };
 
 const stubGateway = (overrides = {}) => ({
@@ -40,6 +48,7 @@ const stubGateway = (overrides = {}) => ({
   storms: async () => payloads.storms,
   assessments: async () => payloads.assessments,
   alerts: async () => payloads.alerts,
+  forecast: async () => payloads.forecast,
   ...overrides
 });
 
@@ -174,6 +183,61 @@ test('the provider supplies a view and the live machinery never starts', async (
   expect(gatewayCalled).toBe(false);
 });
 
+test('the forecast lane lands with its provenance', async () => {
+  const { result } = renderHook(() => useLiveDashboardData({ gateway: stubGateway(), pollMs: 0 }));
+  await waitFor(() => expect(result.current.fetchedAt).not.toBeNull());
+
+  expect(result.current.forecast).toHaveLength(1);
+  expect(result.current.forecast[0].precipitationProbability).toBe(40);
+  expect(result.current.forecast[0].windSpeed).toBe(15);
+  expect(result.current.forecastSource).toBe('nws');
+});
+
+test('a forecast outage degrades that lane alone', async () => {
+  // This is the lane most likely to fail in the field: it proxies
+  // api.weather.gov, which answers 503 WEATHER_UNAVAILABLE often enough that
+  // the chart has to survive it without taking the page with it.
+  const { result } = renderHook(() => useLiveDashboardData({
+    pollMs: 0,
+    gateway: stubGateway({
+      forecast: async () => { throw Object.assign(new Error('down'), { code: 'WEATHER_UNAVAILABLE' }); }
+    })
+  }));
+
+  await waitFor(() => expect(result.current.state).toBe(DATA_STATES.DEGRADED));
+  expect(result.current.failedSources).toEqual(['forecast']);
+  expect(result.current.summary.totalProperties).toBe(1284, 'the rest of the page still works');
+  expect(result.current.sources.forecast.code).toBe('WEATHER_UNAVAILABLE');
+});
+
+test('the map and the dispatch queue come from one read', async () => {
+  // Two reads would let the pins and the list disagree about who the worst
+  // roof is, which is the kind of discrepancy nobody can reproduce.
+  const { result } = renderHook(() => useLiveDashboardData({
+    pollMs: 0,
+    gateway: stubGateway({
+      properties: async () => ({
+        total: { meta: { total: 3 } },
+        highRisk: {
+          meta: { total: 3 },
+          data: [
+            { id: 'p1', address: 'Geocoded A', damage_probability: 94, latitude: 32.7, longitude: -96.8 },
+            { id: 'p2', address: 'Ungeocoded', damage_probability: 90 },
+            { id: 'p3', address: 'Geocoded B', damage_probability: 71, latitude: 32.8, longitude: -96.9 }
+          ]
+        }
+      })
+    })
+  }));
+
+  await waitFor(() => expect(result.current.fetchedAt).not.toBeNull());
+
+  expect(result.current.priorityProperties.map((p) => p.id)).toEqual(['p1', 'p2', 'p3']);
+  // The map only pins what has coordinates - an ungeocoded row would otherwise
+  // land at 0,0, in the Gulf of Guinea.
+  expect(result.current.mapProperties.map((p) => p.id)).toEqual(['p1', 'p3']);
+});
+
 test('one live provider serves many consumers from a single set of reads', async () => {
   // The claim this guards: a second panel that wants the same figures asks for
   // them rather than fetching them again. Two stores on one screen would
@@ -229,7 +293,9 @@ test('the gateway asks for a total rather than a page of rows', async () => {
   const properties = await gateway.properties();
   expect(properties.total.meta.total).toBe(1284);
   expect(seen[0]).toEqual({ limit: 1 });
-  expect(seen[1]).toEqual({ min_risk: 70, sort: 'damage_probability', order: 'desc', limit: 5 });
+  // One read serves the queue and the map, so it asks for enough rows to be
+  // worth pinning - the queue then shows the worst few of the same list.
+  expect(seen[1]).toEqual({ min_risk: 70, sort: 'damage_probability', order: 'desc', limit: 50 });
 
   await gateway.storms();
   expect(seen[2]).toEqual({ status: 'active', limit: 25 });
@@ -240,6 +306,67 @@ test('the gateway asks for a total rather than a page of rows', async () => {
 
   await gateway.alerts();
   expect(seen[4]).toEqual({ area: 'TX' });
+});
+
+test('the forecast lane asks the monitored region, not a hardcoded city', async () => {
+  const seen = [];
+  const client = {
+    storms: {
+      regions: async () => ({
+        data: [
+          // A region with no usable centre must not become the forecast point.
+          { name: 'Unconfigured', center: null },
+          { name: 'Dallas Metro Area', center: { lat: 32.7767, lng: -96.797 } },
+          { name: 'Houston Metro Area', center: { lat: 29.7604, lng: -95.3698 } }
+        ]
+      })
+    },
+    weather: { hourly: async (params) => { seen.push(params); return payloads.forecast; } }
+  };
+
+  const gateway = createDashboardGateway({ client });
+  await gateway.forecast();
+  expect(seen[0]).toEqual({ lat: 32.7767, lng: -96.797 });
+
+  // The region list changes when someone edits settings, not between polls.
+  await gateway.forecast();
+  expect(seen).toHaveLength(2);
+  expect(seen[1]).toEqual(seen[0]);
+});
+
+test('a JSON centre that arrived as a string still resolves', async () => {
+  // `monitoring_regions.center` is a JSON column, and some drivers hand it
+  // back as text.
+  const seen = [];
+  const client = {
+    storms: { regions: async () => ({ data: [{ name: 'Dallas', center: '{"lat":32.7767,"lng":-96.797}' }] }) },
+    weather: { hourly: async (params) => { seen.push(params); return payloads.forecast; } }
+  };
+  await createDashboardGateway({ client }).forecast();
+  expect(seen[0]).toEqual({ lat: 32.7767, lng: -96.797 });
+});
+
+test('a failed region lookup does not cascade into a failed forecast', async () => {
+  const seen = [];
+  const client = {
+    storms: { regions: async () => { throw Object.assign(new Error('nope'), { code: 'NETWORK' }); } },
+    weather: { hourly: async (params) => { seen.push(params); return payloads.forecast; } }
+  };
+
+  const gateway = createDashboardGateway({ client, location: { lat: 30.2672, lng: -97.7431 } });
+  await gateway.forecast();
+  expect(seen[0]).toEqual({ lat: 30.2672, lng: -97.7431 });
+});
+
+test('no region and no default means an empty forecast, not a guessed city', async () => {
+  const client = {
+    storms: { regions: async () => ({ data: [] }) },
+    weather: { hourly: async () => { throw new Error('should not be called'); } }
+  };
+
+  const payload = await createDashboardGateway({ client }).forecast();
+  expect(payload.properties.periods).toEqual([]);
+  expect(payload.source).toBeNull();
 });
 
 test('the alert lane is national when no area is configured', async () => {

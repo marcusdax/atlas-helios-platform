@@ -137,7 +137,8 @@ export function useLiveDashboardData({
     idle.current = Object.freeze({
       state: DATA_STATES.SYNCING,
       summary: { totalProperties: 0, activeStorms: 0, highRiskProperties: 0, recentAssessments: 0, weatherAlerts: 0 },
-      activity: [], priorityProperties: [], fetchedAt: null, age: null,
+      activity: [], priorityProperties: [], mapProperties: [],
+      forecast: [], forecastSource: null, fetchedAt: null, age: null,
       fetching: false, fromCache: false, online: true, realtime: 'disconnected',
       sources: {}, failedSources: [], history: []
     });

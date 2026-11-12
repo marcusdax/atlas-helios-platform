@@ -79,7 +79,7 @@ function App() {
 
   return (
     <Router>
-      <div className="App min-h-screen bg-neutral-950 text-neutral-100">
+      <div className="App app-shell bg-neutral-950 text-neutral-100">
         <WebSocketProvider>
           <DashboardDataProvider>
             <StormProvider>
@@ -88,7 +88,8 @@ function App() {
                 <StormAlert />
 
                 {/* Main Layout */}
-                <div className="flex h-screen overflow-hidden">
+                {/* `app-layout` carries the offset for the fixed nav rail. */}
+                <div className="app-layout overflow-hidden">
                   {/* Navigation */}
                   <Navigation />
 

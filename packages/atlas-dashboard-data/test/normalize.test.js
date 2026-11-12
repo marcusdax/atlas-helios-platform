@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 
 const {
   toEpoch, toNumber, countOf, rowsOf, riskBandFor, humanize,
-  propertiesLane, stormsLane, assessmentsLane, alertsLane, toLane,
+  propertiesLane, stormsLane, assessmentsLane, alertsLane, forecastLane, parseWindSpeed, toLane,
   mergeActivity, composeSnapshot, eventToActivity, mergeSummaryPatch,
   HIGH_RISK_THRESHOLD
 } = require('../src/index.js');
@@ -88,6 +88,22 @@ test('the properties lane reads both counts and ranks the dispatch queue', () =>
   assert.equal(lane.priorityProperties[0].score, 94, 'a measured score beats a modelled one');
   assert.equal(lane.priorityProperties[0].risk, 'high');
   assert.equal(lane.priorityProperties[1].timestamp, Date.parse('2023-11-14T21:10:00Z'));
+});
+
+test('a property that has never been assessed has no assessment instant', () => {
+  // The queue labels this value "assessed". Falling back to `updated_at` made
+  // a property nobody had looked at read as freshly inspected.
+  const lane = propertiesLane({
+    highRisk: {
+      data: [{
+        id: 'x', address: 'Never looked at', damage_probability: 80,
+        last_assessment_date: null,
+        updated_at: '2023-11-14T22:00:00Z',
+        created_at: '2023-11-01T00:00:00Z'
+      }]
+    }
+  });
+  assert.equal(lane.priorityProperties[0].timestamp, null);
 });
 
 test('coordinates are carried, and an ungeocoded row is not placed at 0,0', () => {
@@ -186,15 +202,104 @@ test('the alerts lane prefers the NWS headline', () => {
   assert.equal(lane.activity[1].severity, 'warning');
 });
 
+/* ------------------------------------------------------------- forecast -- */
+
+test('the forecast lane reads the NWS hourly grid', () => {
+  const lane = forecastLane({
+    source: 'nws',
+    properties: {
+      periods: [
+        { startTime: '2023-11-14T22:00:00Z', temperature: 71, windSpeed: '10 to 15 mph', probabilityOfPrecipitation: { value: 40 }, relativeHumidity: { value: 82 }, shortForecast: 'Showers And Thunderstorms Likely' },
+        { startTime: '2023-11-14T21:00:00Z', temperature: 73, windSpeed: '5 mph', probabilityOfPrecipitation: { value: 10 }, shortForecast: 'Partly Cloudy' }
+      ]
+    }
+  });
+
+  assert.equal(lane.forecastSource, 'nws');
+  assert.equal(lane.forecast.length, 2);
+  assert.ok(lane.forecast[0].time < lane.forecast[1].time, 'oldest hour first');
+
+  const [earlier, later] = lane.forecast;
+  assert.equal(earlier.temperature, 73);
+  assert.equal(earlier.windSpeed, 5);
+  assert.equal(later.precipitationProbability, 40);
+  assert.equal(later.humidity, 82);
+  assert.equal(later.shortForecast, 'Showers And Thunderstorms Likely');
+  assert.equal(earlier.humidity, null, 'a missing field is null, not zero');
+});
+
+test('a wind range reads as its top end', () => {
+  // A roof fails at the strongest wind it sees, not the average, so the
+  // conservative read is the useful one.
+  assert.equal(parseWindSpeed('10 to 15 mph'), 15);
+  assert.equal(parseWindSpeed('15 mph'), 15);
+  assert.equal(parseWindSpeed('5 to 10 mph'), 10);
+  assert.equal(parseWindSpeed(12), 12);
+  assert.equal(parseWindSpeed('calm'), null);
+  assert.equal(parseWindSpeed(null), null);
+  assert.equal(parseWindSpeed(undefined), null);
+});
+
+test('the forecast carries its provenance, so a view can label a demo feed', () => {
+  // The backend stamps `mock` when its demo flag is on. Dropping that field
+  // would put us back where we started: a chart of invented numbers that
+  // looks exactly like a real one.
+  assert.equal(forecastLane({ source: 'mock', properties: { periods: [] } }).forecastSource, 'mock');
+  assert.equal(forecastLane({ source: 'nws', properties: { periods: [] } }).forecastSource, 'nws');
+  assert.equal(forecastLane({ properties: { periods: [] } }).forecastSource, null, 'unstamped is unknown');
+  assert.equal(forecastLane({ source: 'something-else', properties: { periods: [] } }).forecastSource, null);
+});
+
+test('the forecast is bounded and skips hours with no instant', () => {
+  const periods = Array.from({ length: 48 }, (_, i) => ({
+    startTime: new Date(NOW + i * 3600_000).toISOString(), temperature: 70
+  }));
+  periods.push({ temperature: 70 }, { startTime: 'not a time', temperature: 70 });
+
+  const lane = forecastLane({ properties: { periods } }, { hours: 12 });
+  assert.equal(lane.forecast.length, 12);
+  assert.ok(lane.forecast.every((p) => typeof p.time === 'number'));
+});
+
+test('the lane reads a forecast that is still inside its response envelope', () => {
+  // `/api/weather/forecast/hourly` answers `{ success, data, location }`, so
+  // the periods can arrive one level deeper than the NWS shape.
+  const lane = forecastLane({ data: { source: 'nws', properties: { periods: [{ startTime: '2023-11-14T22:00:00Z', temperature: 70 }] } } });
+  assert.equal(lane.forecast.length, 1);
+  assert.equal(lane.forecastSource, 'nws');
+});
+
 test('every lane survives an empty, null or junk payload', () => {
+  // Each lane contributes a different slice - counts, activity rows, a
+  // ranked list, a time series - so the contract is "whatever you do
+  // contribute is well-formed", not "you contribute a summary".
   for (const payload of [undefined, null, {}, { data: null }, 'nonsense', 42]) {
-    for (const name of ['properties', 'storms', 'assessments', 'alerts']) {
+    for (const name of ['properties', 'storms', 'assessments', 'alerts', 'forecast']) {
+      const where = `${name} with ${JSON.stringify(payload)}`;
       const lane = toLane(name, payload);
-      assert.ok(lane.summary, `${name} with ${JSON.stringify(payload)} produced no summary`);
-      for (const value of Object.values(lane.summary)) assert.equal(typeof value, 'number');
-      for (const row of lane.activity || []) assert.equal(typeof row.message, 'string');
+      assert.equal(typeof lane, 'object', `${where} produced no lane`);
+
+      for (const value of Object.values(lane.summary || {})) {
+        assert.equal(typeof value, 'number', `${where} produced a non-numeric count`);
+      }
+      for (const row of lane.activity || []) {
+        assert.equal(typeof row.message, 'string', `${where} produced a row with no message`);
+        assert.equal(typeof row.id, 'string');
+      }
+      for (const row of lane.priorityProperties || []) {
+        assert.equal(typeof row.score, 'number', `${where} produced an unscored property`);
+      }
+      for (const point of lane.forecast || []) {
+        assert.equal(typeof point.time, 'number', `${where} produced a timeless forecast hour`);
+      }
     }
   }
+
+  // And the composed snapshot is always complete, whatever the lanes did.
+  const snapshot = composeSnapshot({ forecast: toLane('forecast', null) });
+  assert.deepEqual(snapshot.forecast, []);
+  assert.equal(snapshot.forecastSource, null);
+  assert.equal(snapshot.summary.totalProperties, 0);
 });
 
 test('an unknown lane name is a programming error, not a silent empty card', () => {

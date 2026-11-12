@@ -23,7 +23,7 @@ const { composeSnapshot, toLane, eventToActivity, mergeSummaryPatch, EMPTY_SUMMA
  */
 
 const LANE_NAMES = Object.freeze([
-  SOURCES.PROPERTIES, SOURCES.STORMS, SOURCES.ASSESSMENTS, SOURCES.ALERTS
+  SOURCES.PROPERTIES, SOURCES.STORMS, SOURCES.ASSESSMENTS, SOURCES.ALERTS, SOURCES.FORECAST
 ]);
 
 const idleStatus = () => ({ ok: false, at: null, code: null, message: null });
@@ -44,6 +44,7 @@ class DashboardStore {
    * @param {number} [options.staleAfterMs]
    * @param {number} [options.activityLimit]
    * @param {number} [options.priorityLimit]
+   * @param {number} [options.mapLimit]
    * @param {number} [options.pushDebounceMs]  How long to coalesce pushes before re-reading.
    * @param {{setTimeout: Function, clearTimeout: Function}} [options.scheduler]
    * @param {boolean} [options.online]
@@ -55,6 +56,7 @@ class DashboardStore {
     staleAfterMs = STALE_AFTER_MS,
     activityLimit = 12,
     priorityLimit = 5,
+    mapLimit = 50,
     pushDebounceMs = 2000,
     scheduler = { setTimeout, clearTimeout },
     online = true
@@ -65,6 +67,7 @@ class DashboardStore {
     this.staleAfterMs = staleAfterMs;
     this.activityLimit = activityLimit;
     this.priorityLimit = priorityLimit;
+    this.mapLimit = mapLimit;
     this.pushDebounceMs = pushDebounceMs;
     this.scheduler = scheduler;
 
@@ -128,6 +131,9 @@ class DashboardStore {
         : this.snapshot.summary,
       activity: this.snapshot.activity,
       priorityProperties: this.snapshot.priorityProperties,
+      mapProperties: this.snapshot.mapProperties,
+      forecast: this.snapshot.forecast,
+      forecastSource: this.snapshot.forecastSource,
       fetchedAt,
       age: fetchedAt === null ? null : Math.max(0, this.now() - fetchedAt),
       fetching: this.fetching,
@@ -196,6 +202,8 @@ class DashboardStore {
     if (a.state !== b.state || a.fetching !== b.fetching || a.fromCache !== b.fromCache) return true;
     if (a.fetchedAt !== b.fetchedAt || a.online !== b.online || a.realtime !== b.realtime) return true;
     if (a.activity !== b.activity || a.priorityProperties !== b.priorityProperties) return true;
+    if (a.mapProperties !== b.mapProperties || a.forecast !== b.forecast) return true;
+    if (a.forecastSource !== b.forecastSource) return true;
     if (a.failedSources.join() !== b.failedSources.join()) return true;
     return Object.keys(EMPTY_SUMMARY).some((key) => a.summary[key] !== b.summary[key]);
   }
@@ -286,7 +294,8 @@ class DashboardStore {
           try {
             this.lanes[name] = toLane(name, result.value, {
               activityLimit: this.activityLimit,
-              priorityLimit: this.priorityLimit
+              priorityLimit: this.priorityLimit,
+              mapLimit: this.mapLimit
             });
             this.sources[name] = { ok: true, at, code: null, message: null };
             anyOk = true;

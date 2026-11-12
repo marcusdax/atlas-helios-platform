@@ -39,6 +39,15 @@ test('each fixture is shaped like a real view', () => {
     }
     assert.ok(Array.isArray(view.activity), `${name}.activity must be an array`);
     assert.ok(Array.isArray(view.priorityProperties));
+    assert.ok(Array.isArray(view.forecast), `${name}.forecast must be an array`);
+    assert.ok(
+      view.forecastSource === null || view.forecastSource === 'nws' || view.forecastSource === 'mock',
+      `${name}.forecastSource must be nws, mock or null`
+    );
+    for (const point of view.forecast) {
+      assert.equal(typeof point.time, 'number', 'forecast instants are epoch ms');
+      assert.ok(point.precipitationProbability >= 0 && point.precipitationProbability <= 100);
+    }
     assert.ok(Array.isArray(view.failedSources));
     assert.ok(view.fetchedAt === null || typeof view.fetchedAt === 'number');
 

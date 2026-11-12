@@ -8,6 +8,32 @@ const logger = require('../utils/logger');
 const router = express.Router();
 
 /**
+ * Column names, and why they all changed at once.
+ *
+ * Every database access in this file addressed its columns in camelCase -
+ * `companyId`, `emailVerified`, `createdAt`, `userId`, `expiresAt` - while the
+ * migration creates them in snake_case. So register, login, refresh, profile
+ * update, email verification and both halves of password reset all threw "no
+ * such column" on their first query. Only `GET /me` worked, because it was the
+ * one handler written against the real schema, and it was also the only one
+ * with a test.
+ *
+ * The JSON the endpoints answer with keeps its camelCase keys: that is the API
+ * contract clients are written against, and it is a reasonable one. Only the
+ * column names moved.
+ *
+ * Instants are written and compared as ISO-8601 strings, explicitly.
+ *
+ * `expires_at` used to be handed a `Date` object while `created_at` beside it
+ * got `.toISOString()`. The driver did not serialise the `Date`: the column
+ * ended up holding the literal text "[object Object]", so
+ * `where('expires_at', '>', now)` never matched and no refresh token or
+ * password-reset token could ever be redeemed. Being explicit also keeps the
+ * comparison portable - ISO-8601 sorts lexicographically in the order it sorts
+ * chronologically, on SQLite and Postgres alike.
+ */
+
+/**
  * @route POST /api/auth/register
  * @desc Register new user
  * @access Public
@@ -44,7 +70,7 @@ router.post('/register', asyncHandler(async (req, res) => {
       company = {
         id: require('uuid').v4(),
         name: companyName,
-        createdAt: new Date().toISOString()
+        created_at: new Date().toISOString()
       };
       await db('companies').insert(company);
     }
@@ -57,11 +83,11 @@ router.post('/register', asyncHandler(async (req, res) => {
     email,
     password: hashedPassword,
     role,
-    companyId: company ? company.id : null,
+    company_id: company ? company.id : null,
     status: 'active',
-    emailVerified: false,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
+    email_verified: false,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
   };
 
   await db('users').insert(user);
@@ -73,10 +99,10 @@ router.post('/register', asyncHandler(async (req, res) => {
   // Save refresh token
   await db('refresh_tokens').insert({
     id: require('uuid').v4(),
-    userId: user.id,
+    user_id: user.id,
     token: refreshToken,
-    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
-    createdAt: new Date().toISOString()
+    expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(), // 7 days
+    created_at: new Date().toISOString()
   });
 
   logger.info(`User registered: ${email}`);
@@ -90,7 +116,7 @@ router.post('/register', asyncHandler(async (req, res) => {
         name: user.name,
         email: user.email,
         role: user.role,
-        companyId: user.companyId
+        companyId: user.company_id
       },
       tokens: {
         accessToken,
@@ -118,7 +144,7 @@ router.post('/login', asyncHandler(async (req, res) => {
 
   // Find user
   const user = await db('users')
-    .select('id', 'name', 'email', 'password', 'role', 'companyId', 'status')
+    .select('id', 'name', 'email', 'password', 'role', 'company_id', 'status')
     .where('email', email)
     .first();
 
@@ -153,18 +179,18 @@ router.post('/login', asyncHandler(async (req, res) => {
   // Save refresh token
   await db('refresh_tokens').insert({
     id: require('uuid').v4(),
-    userId: user.id,
+    user_id: user.id,
     token: refreshToken,
-    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
-    createdAt: new Date().toISOString()
+    expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(), // 7 days
+    created_at: new Date().toISOString()
   });
 
   // Update last login
   await db('users')
     .where('id', user.id)
     .update({
-      lastLoginAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
+      last_login_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
     });
 
   logger.info(`User logged in: ${email}`);
@@ -178,7 +204,7 @@ router.post('/login', asyncHandler(async (req, res) => {
         name: user.name,
         email: user.email,
         role: user.role,
-        companyId: user.companyId
+        companyId: user.company_id
       },
       tokens: {
         accessToken,
@@ -210,8 +236,8 @@ router.post('/refresh', asyncHandler(async (req, res) => {
     // Check if token exists in database and is valid
     const tokenRecord = await db('refresh_tokens')
       .where('token', refreshToken)
-      .where('userId', decoded.userId)
-      .where('expiresAt', '>', new Date())
+      .where('user_id', decoded.userId)
+      .where('expires_at', '>', new Date().toISOString())
       .first();
 
     if (!tokenRecord) {
@@ -223,7 +249,7 @@ router.post('/refresh', asyncHandler(async (req, res) => {
 
     // Get user
     const user = await db('users')
-      .select('id', 'name', 'email', 'role', 'companyId', 'status')
+      .select('id', 'name', 'email', 'role', 'company_id', 'status')
       .where('id', decoded.userId)
       .first();
 
@@ -247,7 +273,7 @@ router.post('/refresh', asyncHandler(async (req, res) => {
           name: user.name,
           email: user.email,
           role: user.role,
-          companyId: user.companyId
+          companyId: user.company_id
         }
       }
     });
@@ -335,7 +361,7 @@ router.put('/profile', authMiddleware, asyncHandler(async (req, res) => {
   const user = req.user;
 
   const updateData = {
-    updatedAt: new Date().toISOString()
+    updated_at: new Date().toISOString()
   };
 
   // Update name
@@ -359,7 +385,7 @@ router.put('/profile', authMiddleware, asyncHandler(async (req, res) => {
     }
 
     updateData.email = email;
-    updateData.emailVerified = false; // Reset email verification
+    updateData.email_verified = false; // Reset email verification
   }
 
   // Update password
@@ -397,7 +423,7 @@ router.put('/profile', authMiddleware, asyncHandler(async (req, res) => {
 
   // Get updated user data
   const updatedUser = await db('users')
-    .select('id', 'name', 'email', 'role', 'companyId')
+    .select('id', 'name', 'email', 'role', 'company_id')
     .where('id', user.id)
     .first();
 
@@ -426,8 +452,8 @@ router.post('/verify-email', asyncHandler(async (req, res) => {
   await db('users')
     .where('id', user.id)
     .update({
-      emailVerified: true,
-      updatedAt: new Date().toISOString()
+      email_verified: true,
+      updated_at: new Date().toISOString()
     });
 
   res.json({
@@ -455,15 +481,15 @@ router.post('/forgot-password', asyncHandler(async (req, res) => {
 
   // Generate reset token
   const resetToken = require('uuid').v4();
-  const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+  const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString(); // 1 hour
 
   // Save reset token
   await db('password_resets').insert({
     id: require('uuid').v4(),
-    userId: user.id,
+    user_id: user.id,
     token: resetToken,
-    expiresAt,
-    createdAt: new Date().toISOString()
+    expires_at: expiresAt,
+    created_at: new Date().toISOString()
   });
 
   // In a real implementation, send email here
@@ -493,7 +519,7 @@ router.post('/reset-password', asyncHandler(async (req, res) => {
   // Find valid reset token
   const resetRecord = await db('password_resets')
     .where('token', token)
-    .where('expiresAt', '>', new Date())
+    .where('expires_at', '>', new Date().toISOString())
     .first();
 
   if (!resetRecord) {
@@ -509,10 +535,10 @@ router.post('/reset-password', asyncHandler(async (req, res) => {
 
   // Update user password
   await db('users')
-    .where('id', resetRecord.userId)
+    .where('id', resetRecord.user_id)
     .update({
       password: hashedPassword,
-      updatedAt: new Date().toISOString()
+      updated_at: new Date().toISOString()
     });
 
   // Remove used reset token
@@ -522,10 +548,10 @@ router.post('/reset-password', asyncHandler(async (req, res) => {
 
   // Remove all existing refresh tokens for security
   await db('refresh_tokens')
-    .where('userId', resetRecord.userId)
+    .where('user_id', resetRecord.user_id)
     .delete();
 
-  logger.info(`Password reset completed for user: ${resetRecord.userId}`);
+  logger.info(`Password reset completed for user: ${resetRecord.user_id}`);
 
   res.json({
     success: true,

@@ -3,8 +3,37 @@
 }
 
 /* Layout Components */
-.main-layout {
+/*
+  The navigation rail's width, in one place.
+
+  `.nav-sidebar` is `position: fixed`, so it is out of flow and contributes no
+  width to the layout beside it. Nothing offset that layout, so the contextual
+  sidebar rendered underneath the rail and its first 80px - the start of every
+  line of text in it - was permanently hidden. Both the rail and the offset now
+  read the same variable, so they cannot drift apart again.
+*/
+:root {
+  --nav-width: 80px;
+}
+
+.main-layout,
+.app-layout {
   display: flex;
+  /*
+    `min-height: 0` rather than `height: 100vh`: the shell is a flex column and
+    this is its growing child, so a hard viewport height would push the
+    severe-weather banner off the top of the screen instead of sitting under it.
+  */
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  padding-left: var(--nav-width);
+}
+
+/* The app shell: banner on top, layout filling what is left. */
+.app-shell {
+  display: flex;
+  flex-direction: column;
   height: 100vh;
   overflow: hidden;
 }
@@ -40,7 +69,7 @@
   left: 0;
   top: 0;
   height: 100vh;
-  width: 80px;
+  width: var(--nav-width);
   background: var(--neutral-900);
   border-right: 1px solid var(--neutral-800);
   display: flex;
@@ -108,23 +137,18 @@
 }
 
 /* Storm Alert Banner */
-.storm-alert-banner {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 64px;
-  background: var(--error-500);
-  display: flex;
-  align-items: center;
-  padding: 0 var(--space-lg);
-  z-index: 1000;
-  transform: translateY(-100%);
-  transition: transform 0.4s ease-out;
-}
+/*
+  The severe-weather banner is laid out and animated by its component.
 
-.storm-alert-banner.visible {
-  transform: translateY(0);
+  These rules used to pin it with `position: fixed` and hide it with
+  `transform: translateY(-100%)`, revealed by a `.visible` class that the
+  component never set - so the CSS was both fighting the component's own
+  entrance animation and, when that animation won, covering the page heading
+  underneath it. The banner now sits in the app shell's flex column, where the
+  layout below it shrinks to fit instead of disappearing behind it.
+*/
+.storm-alert-banner {
+  background: var(--error-500);
 }
 
 .storm-alert-content {
