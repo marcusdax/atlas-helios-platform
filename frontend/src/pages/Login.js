@@ -34,12 +34,19 @@ export default function Login() {
       // Nothing to navigate: the gate above swaps this screen for the app as
       // soon as the status changes. Routing here would fight that.
     } catch (err) {
-      if (err?.code === 'NETWORK') {
-        setError('Could not reach the server. Check that the API is running.');
+      if (err?.code === 'NETWORK' || err?.code === 'API_UNREACHABLE') {
+        setError('Could not reach the server. Check that the API is running, then try again.');
       } else if (err?.status === 401) {
         setError('Those credentials were not accepted.');
       } else if (err?.status === 429) {
         setError('Too many attempts. Wait a moment and try again.');
+      } else if (err?.status === 502 || err?.status === 503 || err?.status === 504) {
+        // Reached something, but not the API: a proxy or load balancer between
+        // here and it answered instead. Reported separately from a refusal
+        // because the credentials were never actually checked.
+        setError('The server is not responding right now. Try again in a moment.');
+      } else if (err?.status >= 500) {
+        setError('The server failed to handle the sign-in. Try again, and tell an administrator if it keeps happening.');
       } else {
         setError(messageFor(err));
       }
