@@ -88,6 +88,36 @@ beforeAll(async () => {
     id: uuid(), region_name: 'Dallas Metro', storm_type: 'hail', event_type: 'hail',
     severity: 'high', status: 'active', latitude: 32.7767, longitude: -96.797, radius_miles: 25
   });
+
+  // Alert fixtures. A storm alert has no company of its own - it inherits one
+  // from the monitoring region its storm was detected in - so each company
+  // needs a region, a storm in it, and an alert on that storm. These storms are
+  // left without coordinates on purpose, so they cannot drift into the viewport
+  // assertions above.
+  const alertChain = async (company, label) => {
+    const region = await insert('monitoring_regions', {
+      id: uuid(), name: `${label} Region`, company_id: company.id, active: true
+    });
+    const storm = await insert('storm_events', {
+      id: uuid(), region_id: region.id, region_name: `${label} Region`,
+      storm_type: 'wind', event_type: 'wind', severity: 'moderate', status: 'active'
+    });
+    const alert = await insert('storm_alerts', {
+      id: uuid(), storm_event_id: storm.id, alert_level: 'warning',
+      message: `${label} alert`, acknowledged: false
+    });
+    return { region, storm, alert };
+  };
+
+  fixtures.alertsA = await alertChain(fixtures.companyA, 'Acme');
+  fixtures.alertsB = await alertChain(fixtures.companyB, 'Rival');
+
+  // An alert on a storm that belongs to no monitoring region, and so to no
+  // company. It must reach nobody rather than everybody.
+  fixtures.orphanAlert = await insert('storm_alerts', {
+    id: uuid(), storm_event_id: fixtures.storm.id, alert_level: 'watch',
+    message: 'unattributed alert', acknowledged: false
+  });
 });
 
 afterAll(async () => { await db.destroy(); });
@@ -233,6 +263,47 @@ describe('storms', () => {
 
   test('an unknown storm is a 404', async () => {
     await request(app).get('/api/storms/00000000-0000-0000-0000-000000000000').expect(404);
+  });
+
+  test('user alerts require authentication', async () => {
+    await request(app).get('/api/storms/alerts/user').expect(401);
+  });
+
+  test('user alerts are scoped through the monitoring region join', async () => {
+    const a = await request(app).get('/api/storms/alerts/user').set(auth(fixtures.tokenA)).expect(200);
+    const b = await request(app).get('/api/storms/alerts/user').set(auth(fixtures.tokenB)).expect(200);
+
+    expect(a.body.data.map((r) => r.message)).toEqual(['Acme alert']);
+    expect(b.body.data.map((r) => r.message)).toEqual(['Rival alert']);
+  });
+
+  test('an alert belonging to no region reaches no company', async () => {
+    for (const token of [fixtures.tokenA, fixtures.tokenB]) {
+      const res = await request(app).get('/api/storms/alerts/user').set(auth(token)).expect(200);
+      expect(res.body.data.map((r) => r.id)).not.toContain(fixtures.orphanAlert.id);
+    }
+  });
+
+  test('user alerts carry the storm context and the standard page meta', async () => {
+    const res = await request(app).get('/api/storms/alerts/user')
+      .set(auth(fixtures.tokenA)).query({ limit: 1 }).expect(200);
+
+    expect(res.body.data[0]).toMatchObject({
+      alert_level: 'warning',
+      storm_event_type: 'wind',
+      storm_region_name: 'Acme Region'
+    });
+    expect(res.body.meta).toMatchObject({ page: 1, limit: 1, total: 1 });
+  });
+
+  test('user alerts filter on acknowledgement', async () => {
+    const open = await request(app).get('/api/storms/alerts/user')
+      .set(auth(fixtures.tokenA)).query({ acknowledged: false }).expect(200);
+    expect(open.body.data).toHaveLength(1);
+
+    const closed = await request(app).get('/api/storms/alerts/user')
+      .set(auth(fixtures.tokenA)).query({ acknowledged: true }).expect(200);
+    expect(closed.body.data).toHaveLength(0);
   });
 });
 

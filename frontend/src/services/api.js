@@ -74,7 +74,9 @@ export const propertiesAPI = {
 
 // ==================== ASSESSMENTS API ====================
 export const assessmentsAPI = {
-  getAll: (params) => api.get('/api/assessments', { params }),
+  // The assessments router has no index route: the company-scoped list lives at
+  // /history, which pages and filters the same way every other list does.
+  getAll: (params) => api.get('/api/assessments/history', { params }),
   getById: (id) => api.get(`/api/assessments/${id}`),
   create: (data) => api.post('/api/assessments', data),
   update: (id, data) => api.put(`/api/assessments/${id}`, data),
