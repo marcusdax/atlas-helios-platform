@@ -17,6 +17,7 @@ import EstimateGenerator from './pages/EstimateGenerator';
 import Settings from './pages/Settings';
 import MobileFieldTool from './pages/MobileFieldTool';
 import SystemStatus from './pages/SystemStatus';
+import Login from './pages/Login';
 
 // Styles and Assets
 import './App.css';
@@ -44,6 +45,7 @@ import { DashboardDataProvider } from './data/useDashboardData';
 */
 import { StormProvider } from './contexts/StormContext';
 import { PropertyProvider } from './contexts/PropertyContext';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
 
 /**
  * The application shell.
@@ -79,6 +81,39 @@ function App() {
 
   return (
     <Router>
+      <AuthProvider>
+        <AuthGate />
+      </AuthProvider>
+    </Router>
+  );
+}
+
+/**
+ * Decide what a visitor sees before any data provider is mounted.
+ *
+ * The providers below all fetch on mount, so this has to be a *mount* gate
+ * rather than a redirect: rendering the shell for a signed-out visitor and
+ * then navigating away still fires every one of those requests, which is how
+ * the earlier redirect loop managed to exhaust the rate limiter.
+ */
+function AuthGate() {
+  const { status } = useAuth();
+
+  if (status === 'checking') {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-neutral-950">
+        <p className="text-sm text-neutral-400" role="status">Restoring your session…</p>
+      </div>
+    );
+  }
+
+  if (status !== 'authenticated') return <Login />;
+
+  return <AuthenticatedApp />;
+}
+
+function AuthenticatedApp() {
+  return (
       <div className="App app-shell bg-neutral-950 text-neutral-100">
         <WebSocketProvider>
           <DashboardDataProvider>
@@ -135,7 +170,6 @@ function App() {
           </DashboardDataProvider>
         </WebSocketProvider>
       </div>
-    </Router>
   );
 }
 

@@ -73,7 +73,11 @@ async function request(path, { method = 'GET', body, signal, headers = {} } = {}
   const payload = await response.json().catch(() => null);
 
   if (!response.ok) {
-    throw new ApiError(payload?.error || `Request failed (${response.status})`, {
+    // The API reports failures under `message`; `error` is checked first for
+    // the handful of endpoints that use it. Without the `message` fallback a
+    // refused sign-in surfaced as "Request failed (401)" rather than the
+    // reason the server actually gave.
+    throw new ApiError(payload?.error || payload?.message || `Request failed (${response.status})`, {
       code: payload?.code,
       status: response.status,
       details: payload?.details
