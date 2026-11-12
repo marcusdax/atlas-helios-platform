@@ -19,6 +19,22 @@ try {
 }
 
 /**
+ * Translate a service error into a response.
+ *
+ * Every handler here used to answer `500 { error: message }`, which told a
+ * client nothing it could branch on. An upstream that is simply down is a 503
+ * with a stable code, so the dashboard's data layer can mark that one lane
+ * DEGRADED and keep its last known figures instead of treating it as a bug.
+ */
+const fail = (res, error, what) => {
+  const status = error?.statusCode || 500;
+  const code = error?.code || 'INTERNAL_ERROR';
+  if (status >= 500 && status !== 503) logger.error(`${what}:`, error?.message || error);
+  else logger.warn(`${what}: ${error?.message || error}`);
+  return res.status(status).json({ error: error?.message || 'Request failed', code });
+};
+
+/**
  * @route   GET /api/weather/status
  * @desc    Get NOAA Weather Service status
  * @access  Public
@@ -38,8 +54,7 @@ router.get('/status', async (req, res) => {
       ...status
     });
   } catch (error) {
-    logger.error('Error getting NOAA Weather status:', error);
-    res.status(500).json({ error: error.message });
+    return fail(res, error, 'Error getting NOAA Weather status');
   }
 });
 
@@ -83,8 +98,7 @@ router.get('/forecast', async (req, res) => {
       timestamp: new Date().toISOString()
     });
   } catch (error) {
-    logger.error('Error getting forecast:', error);
-    res.status(500).json({ error: error.message });
+    return fail(res, error, 'Error getting forecast');
   }
 });
 
@@ -128,8 +142,7 @@ router.get('/forecast/hourly', async (req, res) => {
       timestamp: new Date().toISOString()
     });
   } catch (error) {
-    logger.error('Error getting hourly forecast:', error);
-    res.status(500).json({ error: error.message });
+    return fail(res, error, 'Error getting hourly forecast');
   }
 });
 
@@ -154,8 +167,7 @@ router.get('/alerts', async (req, res) => {
       timestamp: new Date().toISOString()
     });
   } catch (error) {
-    logger.error('Error getting alerts:', error);
-    res.status(500).json({ error: error.message });
+    return fail(res, error, 'Error getting alerts');
   }
 });
 
@@ -202,8 +214,7 @@ router.get('/alerts/area', async (req, res) => {
       timestamp: new Date().toISOString()
     });
   } catch (error) {
-    logger.error('Error getting area alerts:', error);
-    res.status(500).json({ error: error.message });
+    return fail(res, error, 'Error getting area alerts');
   }
 });
 
@@ -247,8 +258,7 @@ router.get('/severe', async (req, res) => {
       timestamp: new Date().toISOString()
     });
   } catch (error) {
-    logger.error('Error checking severe weather:', error);
-    res.status(500).json({ error: error.message });
+    return fail(res, error, 'Error checking severe weather');
   }
 });
 
@@ -273,8 +283,7 @@ router.get('/radar/stations', async (req, res) => {
       timestamp: new Date().toISOString()
     });
   } catch (error) {
-    logger.error('Error getting radar stations:', error);
-    res.status(500).json({ error: error.message });
+    return fail(res, error, 'Error getting radar stations');
   }
 });
 
@@ -303,8 +312,7 @@ router.get('/stormreports', async (req, res) => {
       timestamp: new Date().toISOString()
     });
   } catch (error) {
-    logger.error('Error getting storm reports:', error);
-    res.status(500).json({ error: error.message });
+    return fail(res, error, 'Error getting storm reports');
   }
 });
 
@@ -354,8 +362,7 @@ router.get('/zones', async (req, res) => {
       timestamp: new Date().toISOString()
     });
   } catch (error) {
-    logger.error('Error getting weather zones:', error);
-    res.status(500).json({ error: error.message });
+    return fail(res, error, 'Error getting weather zones');
   }
 });
 
@@ -407,8 +414,7 @@ router.post('/batch/severe', authMiddleware, async (req, res) => {
       timestamp: new Date().toISOString()
     });
   } catch (error) {
-    logger.error('Error in batch severe weather check:', error);
-    res.status(500).json({ error: error.message });
+    return fail(res, error, 'Error in batch severe weather check');
   }
 });
 

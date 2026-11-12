@@ -8,11 +8,48 @@ npm install            # from the repo root: this is an npm workspace
 npm start              # dev server on :3000, proxying /api to :5000
 npm test               # jest + React Testing Library
 npm run build          # production bundle
+npm run build:check    # production build, failing only on OUR warnings
+npm run storybook      # component gallery on :6006
 ```
+
+`build:check` exists because `CI=true npm run build` promotes every webpack
+warning to an error, including ones emitted from inside a dependency — today,
+`maplibre-gl` v6's own bundle contains a dynamic require that webpack flags.
+That one third-party warning made the strict build unusable, so nobody ran it,
+so real lint errors in our code reached reviewers instead. `build:check` runs
+the same build and fails only on warnings from `src/` or our workspace
+packages, lint findings included.
 
 `npm start` proxies `/api` to `http://localhost:5000` (the `proxy` field in
 `package.json`), so run the backend alongside it — or `npm run dev` from the
 root, which starts both.
+
+### Running the whole stack without Postgres
+
+The backend defaults to Postgres, which is what production runs. For a local
+look at the product, `DB_CLIENT=sqlite3` puts it on a file instead — the same
+engine the test suite already uses, so the migration is known to work on it:
+
+```bash
+cd backend
+DB_CLIENT=sqlite3 npm run migrate     # create the schema
+DB_CLIENT=sqlite3 npm run seed        # a company, 12 properties, 2 storms, 6 assessments
+DB_CLIENT=sqlite3 npm run dev         # :5000
+
+cd ../frontend && npm start           # :3000
+```
+
+Sign in with **dev@atlashelios.test / atlas-dev-password**.
+
+The seed is a development dataset, not mock data: they are rows in a real
+database, read through the real API. Delete them and the dashboard honestly
+shows an empty tenant; stop the backend and it honestly shows OFFLINE.
+
+With no outbound access to `api.weather.gov` the alert and forecast lanes
+answer 503 and the dashboard shows DEGRADED with those two feeds named — which
+is the intended behaviour, and a good way to see it. `WEATHER_ALLOW_MOCK=true`
+on the backend makes the forecast render from the demo generator instead,
+labelled *"Demo forecast — the NOAA feed is not connected."*
 
 ### Environment
 
@@ -20,6 +57,12 @@ root, which starts both.
 |---|---|---|
 | `REACT_APP_API_URL` | `/api` | Same-origin by default, which is what the reverse proxy expects. |
 | `REACT_APP_WS_URL` | the page's own origin | Only set this for a split deployment where the socket lives elsewhere. |
+| `REACT_APP_DEFAULT_LAT` / `_LNG` | — | Fallback forecast point. Normally unnecessary: the dashboard forecasts the first active monitoring region. |
+
+The backend has one worth knowing about too: **`WEATHER_ALLOW_MOCK=true`** lets
+a failed NOAA call answer with the demo generator instead of a 503. It is off by
+default, and even when on the payload is stamped `source: 'mock'` so the chart
+labels itself. Weather *alerts* never fabricate either way.
 
 ---
 
@@ -48,6 +91,9 @@ const { state, summary, activity, priorityProperties,
 | `summary` | The five counts. Always numbers, never `undefined`. |
 | `activity` | Newest-first events, messages already composed. |
 | `priorityProperties` | Worst-first dispatch queue. |
+| `mapProperties` | The same read, more rows, ungeocoded ones dropped — what the map pins. |
+| `forecast` | Next 24 hours from the NWS hourly grid, oldest first. |
+| `forecastSource` | `'nws'`, `'mock'` or `null`. A view showing `mock` must say so. |
 | `fetchedAt` | Epoch ms of the newest data on screen, or `null`. |
 | `failedSources` | Which read lanes are down, by name. |
 | `fetching` | A read is in flight. Separate from `state` on purpose. |
@@ -135,22 +181,18 @@ production bundle by a stray import.
 
 ## Storybook
 
-The config (`.storybook/`) and the stories (`src/**/*.stories.jsx`) are
-committed; Storybook itself is **not** in `package.json`. Several hundred
-megabytes of unpinned devDependencies on a workspace whose Docker build runs
-`npm ci` is a change that deserves its own review, and the thing this work
-needed — a way to render every data state without a network — is the mock
-provider, which already works in plain component tests.
-
-One install, from the repo root:
-
 ```bash
-npm i -D --workspace=atlas-helios-frontend \
-  storybook @storybook/react @storybook/react-webpack5 \
-  @storybook/addon-essentials @storybook/addon-a11y
-
-npm run storybook --workspace=atlas-helios-frontend     # :6006
+npm run storybook          # :6006
+npm run build-storybook    # static build into storybook-static/ (gitignored)
 ```
+
+`@storybook/preset-create-react-app` is the load-bearing piece and has to stay
+first in the `addons` list. Storybook notices `react-scripts` is installed and
+switches its own babel handling off, so without that preset the webpack chain
+carries no babel-loader at all and the build dies on the first line of JSX in
+every story. Handing Storybook CRA's own config is the better outcome anyway: a
+story then compiles exactly the way the component does, Tailwind and PostCSS
+included.
 
 Committed stories:
 
@@ -161,7 +203,19 @@ Committed stories:
 | `Dashboard/QuickStats` | The tiles in every state, including one failed lane among four healthy |
 | `Dashboard/ActivityFeed` | Skeletons, rows, degraded, and empty-vs-offline |
 | `Dashboard/PriorityQueue` | Every state, plus a property nobody has assessed |
+| `Dashboard/PredictionChart` | Every state, a labelled demo feed, a forecast-only outage, and no configured region |
 
 There is deliberately **no full-page `Dashboard` story**: `RadarMap` fetches
 radar tiles and alert polygons of its own, so the page would not render
 meaningfully without a network.
+
+### Adding a story
+
+Give the component its view as props and take it from the shared fixtures, so
+the gallery and the tests show the same thing:
+
+```jsx
+import { dashboardFixtures } from '@atlas/dashboard-data/src/fixtures';
+const fixtures = dashboardFixtures();
+// ...then render one panel per state, side by side.
+```

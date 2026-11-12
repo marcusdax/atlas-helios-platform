@@ -66,13 +66,14 @@ const STATE_SEVERITY = Object.freeze([
  * The named read lanes. Each one fails independently, which is the whole point:
  * the NWS alert feed going down should dim one card, not blank the dashboard.
  *
- * @typedef {'properties'|'storms'|'assessments'|'alerts'} SourceName
+ * @typedef {'properties'|'storms'|'assessments'|'alerts'|'forecast'} SourceName
  */
 const SOURCES = Object.freeze({
   PROPERTIES: 'properties',
   STORMS: 'storms',
   ASSESSMENTS: 'assessments',
-  ALERTS: 'alerts'
+  ALERTS: 'alerts',
+  FORECAST: 'forecast'
 });
 
 /** @typedef {'assessment'|'storm'|'alert'|'lead'|'system'} ActivityType */
@@ -129,10 +130,32 @@ const MEDIUM_RISK_THRESHOLD = 40;
  */
 
 /**
+ * One hour of the forecast.
+ *
+ * `windSpeed` is the top of the range the NWS quotes. "10 to 15 mph" becomes
+ * 15, because what matters for a roof is the strongest wind it will see, not
+ * the average.
+ *
+ * @typedef {object} ForecastPoint
+ * @property {number} time                   Epoch ms, start of the hour.
+ * @property {number|null} temperature       Fahrenheit.
+ * @property {number} precipitationProbability 0-100.
+ * @property {number|null} windSpeed         mph.
+ * @property {number|null} humidity          0-100, when the feed carries it.
+ * @property {string} shortForecast          The NWS's own phrase.
+ */
+
+/**
  * @typedef {object} DashboardSnapshot
  * @property {DashboardSummary} summary
  * @property {ActivityEvent[]} activity              Newest first.
- * @property {PriorityProperty[]} priorityProperties Worst first.
+ * @property {PriorityProperty[]} priorityProperties Worst first, the dispatch queue.
+ * @property {PriorityProperty[]} mapProperties      The same read, more rows, all
+ *                                                   geocoded - what the map pins.
+ * @property {ForecastPoint[]} forecast              Next 24 hours, oldest first.
+ * @property {'nws'|'mock'|null} forecastSource      Where the forecast came from.
+ *                                                   `mock` means the backend's demo
+ *                                                   flag is on and the view must say so.
  * @property {number|null} fetchedAt                 Epoch ms of the last read that
  *                                                   produced any of this.
  */
@@ -161,6 +184,9 @@ const MEDIUM_RISK_THRESHOLD = 40;
  * @property {DashboardSummary} summary
  * @property {ActivityEvent[]} activity
  * @property {PriorityProperty[]} priorityProperties
+ * @property {PriorityProperty[]} mapProperties
+ * @property {ForecastPoint[]} forecast
+ * @property {'nws'|'mock'|null} forecastSource
  * @property {number|null} fetchedAt
  * @property {number|null} age                  Ms since `fetchedAt`.
  * @property {boolean} fetching

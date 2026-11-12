@@ -31,11 +31,27 @@ const ok = (at) => ({ ok: true, at, code: null, message: null });
 const failed = (at, code, message) => ({ ok: false, at, code, message });
 const idle = () => ({ ok: false, at: null, code: null, message: null });
 
+/** Twenty-four hours that look like a Texas spring afternoon, not a sine wave. */
+const forecast = (now) =>
+  Array.from({ length: 24 }, (_, i) => {
+    const hour = new Date(now + i * 3600_000).getUTCHours();
+    const storming = i >= 2 && i <= 6;
+    return {
+      time: now + i * 3600_000,
+      temperature: Math.round(62 + Math.max(0, Math.sin(((hour - 6) / 24) * Math.PI * 2)) * 22),
+      precipitationProbability: storming ? 60 + (i % 3) * 10 : Math.max(0, 20 - i),
+      windSpeed: storming ? 25 + (i % 4) * 5 : 10 + (i % 3),
+      humidity: storming ? 80 : 55 + (i % 5),
+      shortForecast: storming ? 'Showers And Thunderstorms Likely' : 'Partly Cloudy'
+    };
+  });
+
 const allOk = (at) => ({
   [SOURCES.PROPERTIES]: ok(at),
   [SOURCES.STORMS]: ok(at),
   [SOURCES.ASSESSMENTS]: ok(at),
-  [SOURCES.ALERTS]: ok(at)
+  [SOURCES.ALERTS]: ok(at),
+  [SOURCES.FORECAST]: ok(at)
 });
 
 const summary = () => ({
@@ -101,6 +117,9 @@ function dashboardFixtures({ now = REFERENCE_NOW } = {}) {
     summary: summary(),
     activity: activity(now),
     priorityProperties: priorityProperties(now),
+    mapProperties: priorityProperties(now),
+    forecast: forecast(now),
+    forecastSource: 'nws',
     history: []
   };
 
@@ -127,6 +146,9 @@ function dashboardFixtures({ now = REFERENCE_NOW } = {}) {
       summary: { totalProperties: 0, activeStorms: 0, highRiskProperties: 0, recentAssessments: 0, weatherAlerts: 0 },
       activity: [],
       priorityProperties: [],
+      mapProperties: [],
+      forecast: [],
+      forecastSource: null,
       description: 'First read in flight. Nothing has landed yet.',
       state: DATA_STATES.SYNCING,
       fetchedAt: null,
@@ -139,7 +161,8 @@ function dashboardFixtures({ now = REFERENCE_NOW } = {}) {
         [SOURCES.PROPERTIES]: idle(),
         [SOURCES.STORMS]: idle(),
         [SOURCES.ASSESSMENTS]: idle(),
-        [SOURCES.ALERTS]: idle()
+        [SOURCES.ALERTS]: idle(),
+        [SOURCES.FORECAST]: idle()
       },
       failedSources: []
     },
@@ -191,9 +214,10 @@ function dashboardFixtures({ now = REFERENCE_NOW } = {}) {
         [SOURCES.PROPERTIES]: failed(now - minutes(2), 'NETWORK', 'Could not reach the server.'),
         [SOURCES.STORMS]: failed(now - minutes(2), 'NETWORK', 'Could not reach the server.'),
         [SOURCES.ASSESSMENTS]: failed(now - minutes(2), 'NETWORK', 'Could not reach the server.'),
-        [SOURCES.ALERTS]: failed(now - minutes(2), 'NETWORK', 'Could not reach the server.')
+        [SOURCES.ALERTS]: failed(now - minutes(2), 'NETWORK', 'Could not reach the server.'),
+        [SOURCES.FORECAST]: failed(now - minutes(2), 'NETWORK', 'Could not reach the server.')
       },
-      failedSources: [SOURCES.PROPERTIES, SOURCES.STORMS, SOURCES.ASSESSMENTS, SOURCES.ALERTS]
+      failedSources: [SOURCES.PROPERTIES, SOURCES.STORMS, SOURCES.ASSESSMENTS, SOURCES.ALERTS, SOURCES.FORECAST]
     },
 
     /**
@@ -207,6 +231,10 @@ function dashboardFixtures({ now = REFERENCE_NOW } = {}) {
       summary: { totalProperties: 0, activeStorms: 0, highRiskProperties: 0, recentAssessments: 0, weatherAlerts: 0 },
       activity: [],
       priorityProperties: [],
+      mapProperties: [],
+      // A new company has no properties, but the sky above them is still the sky.
+      forecast: forecast(now),
+      forecastSource: 'nws',
       history: [],
       fetchedAt: now - 5_000,
       age: 5_000,

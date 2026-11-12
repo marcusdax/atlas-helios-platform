@@ -103,18 +103,13 @@ function humanize(value, fallback = '') {
  * `/api/properties` is down, neither answers - and splitting them would only
  * produce a DEGRADED badge that cannot be acted on differently.
  */
-function propertiesLane(payload, { priorityLimit = 5 } = {}) {
+function propertiesLane(payload, { priorityLimit = 5, mapLimit = 50 } = {}) {
   // Destructuring with a `= {}` default would still throw on an explicit
   // null, and `api.js` returns exactly that for a 204.
   const { total, highRisk } = payload || {};
   const rows = rowsOf(highRisk);
 
-  return {
-    summary: {
-      totalProperties: countOf(total),
-      highRiskProperties: countOf(highRisk)
-    },
-    priorityProperties: rows
+  const ranked = rows
       .map((row) => ({
         id: String(row?.id ?? ''),
         address: row?.address || 'Unknown address',
@@ -127,7 +122,17 @@ function propertiesLane(payload, { priorityLimit = 5 } = {}) {
         risk: row?.current_risk_level
           ? String(row.current_risk_level).toLowerCase()
           : riskBandFor(row?.damage_probability),
-        timestamp: toEpoch(row?.last_assessment_date ?? row?.updated_at ?? row?.created_at),
+        /**
+         * When this property was last *assessed*, and null when it has not
+         * been.
+         *
+         * Falling back to `updated_at` here looked harmless and was not: the
+         * queue labels this value "assessed", so a property nobody had ever
+         * looked at borrowed the timestamp of its last row edit and read as
+         * freshly inspected. Null is what makes the row say "not yet
+         * assessed".
+         */
+        timestamp: toEpoch(row?.last_assessment_date),
         // Carried so the same rows can be pinned on the map without a second
         // read. Parsed strictly: `Number(null)` is 0 and 0,0 is the Gulf of
         // Guinea, half a world from any customer, so an ungeocoded row has to
@@ -135,9 +140,26 @@ function propertiesLane(payload, { priorityLimit = 5 } = {}) {
         latitude: coordinate(row?.latitude),
         longitude: coordinate(row?.longitude)
       }))
-      .filter((p) => p.id !== '')
-      .sort((a, b) => b.score - a.score)
-      .slice(0, priorityLimit)
+    .filter((p) => p.id !== '')
+    .sort((a, b) => b.score - a.score);
+
+  return {
+    summary: {
+      totalProperties: countOf(total),
+      highRiskProperties: countOf(highRisk)
+    },
+    /** The dispatch queue: the worst few, for the panel a human reads. */
+    priorityProperties: ranked.slice(0, priorityLimit),
+    /**
+     * The same rows, more of them, for the map.
+     *
+     * One read serves both, which is why the pins and the queue can never
+     * disagree about who the worst roof is. Ungeocoded rows are dropped here
+     * rather than at the map, so the count of pins is honest.
+     */
+    mapProperties: ranked
+      .filter((p) => p.latitude !== null && p.longitude !== null)
+      .slice(0, mapLimit)
   };
 }
 
@@ -241,12 +263,67 @@ function alertsLane(payload, { activityLimit = 10 } = {}) {
   };
 }
 
+/**
+ * The forecast lane: the next 24 hours, from the NWS hourly grid.
+ *
+ * The backend stamps every weather payload with `source`, so a view can say
+ * when it is looking at the demo generator rather than a real forecast. That
+ * field is carried through rather than dropped: this panel used to be a
+ * literal array of twelve numbers, and the whole point of replacing it is that
+ * the screen can now tell the difference.
+ */
+function forecastLane(payload, { hours = 24 } = {}) {
+  const periods = payload?.properties?.periods || payload?.data?.properties?.periods || [];
+  const source = payload?.source || payload?.data?.source || null;
+
+  return {
+    forecastSource: source === 'nws' || source === 'mock' ? source : null,
+    forecast: periods
+      .map((period) => {
+        const time = toEpoch(period?.startTime);
+        if (time === null) return null;
+        return {
+          time,
+          temperature: period?.temperature === null || period?.temperature === undefined
+            ? null
+            : toNumber(period.temperature, 0),
+          precipitationProbability: Math.max(0, Math.min(100,
+            toNumber(period?.probabilityOfPrecipitation?.value, 0))),
+          windSpeed: parseWindSpeed(period?.windSpeed),
+          humidity: period?.relativeHumidity?.value === null || period?.relativeHumidity?.value === undefined
+            ? null
+            : toNumber(period.relativeHumidity.value, 0),
+          shortForecast: period?.shortForecast || ''
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.time - b.time)
+      .slice(0, hours)
+  };
+}
+
+/**
+ * "10 to 15 mph" -> 15.
+ *
+ * The NWS quotes wind as a range in a string. Taking the top of it is
+ * deliberate: a roof fails at the strongest wind it sees, not the average, so
+ * the conservative read is the useful one.
+ */
+function parseWindSpeed(value) {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (typeof value !== 'string') return null;
+  const numbers = value.match(/\d+(?:\.\d+)?/g);
+  if (!numbers || numbers.length === 0) return null;
+  return Math.max(...numbers.map(Number));
+}
+
 /** Which normaliser owns which lane name. */
 const LANE_BUILDERS = Object.freeze({
   properties: propertiesLane,
   storms: stormsLane,
   assessments: assessmentsLane,
-  alerts: alertsLane
+  alerts: alertsLane,
+  forecast: forecastLane
 });
 
 /** Normalise one lane's raw payload into its contribution to the snapshot. */
@@ -320,6 +397,9 @@ function composeSnapshot(lanes = {}, { fetchedAt = null, activityLimit = 12, pus
     summary,
     activity: mergeActivity([...present.map((l) => l.activity), pushed], { limit: activityLimit }),
     priorityProperties: lanes.properties?.priorityProperties || [],
+    mapProperties: lanes.properties?.mapProperties || [],
+    forecast: lanes.forecast?.forecast || [],
+    forecastSource: lanes.forecast?.forecastSource ?? null,
     fetchedAt
   };
 }
@@ -444,6 +524,8 @@ module.exports = {
   stormsLane,
   assessmentsLane,
   alertsLane,
+  forecastLane,
+  parseWindSpeed,
   mergeActivity,
   composeSnapshot,
   eventToActivity,

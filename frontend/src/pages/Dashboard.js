@@ -75,6 +75,9 @@ const Dashboard = () => {
     summary,
     activity,
     priorityProperties,
+    mapProperties,
+    forecast,
+    forecastSource,
     fetchedAt,
     failedSources,
     fetching,
@@ -148,11 +151,14 @@ const Dashboard = () => {
               This panel used to render a Leaflet map with ten hardcoded
               addresses pinned around downtown Dallas, while the animated
               NOAA radar + NWS polygon map the Storm Intelligence page already
-              used sat in the same directory, unused by the dashboard. It takes
-              the properties it pins as a prop, so the dispatch queue and the
-              pins come from one read and cannot disagree.
+              used sat in the same directory, unused by the dashboard.
+
+              `mapProperties` is the same read the dispatch queue comes from,
+              with more of its rows and the ungeocoded ones dropped - so the
+              pins and the queue cannot disagree about who the worst roof is,
+              and nothing lands at 0,0.
             */}
-            <RadarMap properties={priorityProperties} height={384} />
+            <RadarMap properties={mapProperties} height={384} />
           </motion.div>
 
           <motion.div
@@ -214,24 +220,23 @@ const Dashboard = () => {
           >
             <div className="dashboard-card-header">
               <CloudIcon className="dashboard-card-icon" />
-              <h2 className="dashboard-card-title">24-Hour Weather Forecast</h2>
+              <h2 className="dashboard-card-title">24-Hour Precipitation Outlook</h2>
+              <DataStateBadge state={state} compact className="ml-auto" />
             </div>
             {/*
-              Labelled, because it is not real.
-
-              The whole ECharts series in PredictionChart is a literal array,
-              and there is no forecast endpoint behind it yet - the backend
-              reads the NWS hourly forecast internally to detect severe
-              conditions, but never exposes it. An unlabelled chart of invented
-              numbers under the heading "24-Hour Weather Forecast" is exactly
-              the defect the rest of this screen just stopped committing, so it
-              says so until there is a feed to point it at.
+              Real now. The chart reads the NWS hourly grid for the first
+              monitored region through the forecast lane, and labels itself if
+              the backend's demo generator is what answered.
             */}
-            <p className="mb-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
-              Sample shape only — no forecast feed is connected yet.
-            </p>
-            <div className="h-64">
-              <PredictionChart />
+            <div className="h-72">
+              <PredictionChart
+                forecast={forecast}
+                source={forecastSource}
+                state={state}
+                failedSources={failedSources}
+                fetchedAt={fetchedAt}
+                onRetry={refresh}
+              />
             </div>
           </motion.div>
 

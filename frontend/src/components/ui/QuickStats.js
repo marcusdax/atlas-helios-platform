@@ -115,7 +115,9 @@ const QuickStats = ({ data, state = DATA_STATES.LIVE, failedSources = [] }) => {
                 ) : state === DATA_STATES.OFFLINE ? (
                   <p className="mt-1 text-sm text-neutral-500">Cached on this device</p>
                 ) : (
-                  <p className="mt-1 truncate text-sm text-neutral-500" title={tile.caption(value)}>
+                  // Two lines rather than a truncation: "At or above ..." told
+                  // a reader nothing, and the threshold is the point of the tile.
+                  <p className="mt-1 text-sm leading-snug text-neutral-500">
                     {tile.caption(value)}
                   </p>
                 )}

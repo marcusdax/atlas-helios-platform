@@ -21,6 +21,7 @@ export class ApiError extends Error {
 
 /** Copy for the codes the API can return, so pages do not each write their own. */
 const MESSAGES = {
+  WEATHER_UNAVAILABLE: 'The weather forecast feed is temporarily unavailable.',
   VALIDATION_ERROR: 'Some fields need attention.',
   NOT_FOUND: 'That record no longer exists.',
   RATE_LIMITED: 'Too many requests. Try again shortly.',
@@ -72,7 +73,11 @@ async function request(path, { method = 'GET', body, signal, headers = {} } = {}
   const payload = await response.json().catch(() => null);
 
   if (!response.ok) {
-    throw new ApiError(payload?.error || `Request failed (${response.status})`, {
+    // The API reports failures under `message`; `error` is checked first for
+    // the handful of endpoints that use it. Without the `message` fallback a
+    // refused sign-in surfaced as "Request failed (401)" rather than the
+    // reason the server actually gave.
+    throw new ApiError(payload?.error || payload?.message || `Request failed (${response.status})`, {
       code: payload?.code,
       status: response.status,
       details: payload?.details
@@ -137,6 +142,22 @@ export const api = {
     create: (body) => request('/estimates', { method: 'POST', body }),
     update: (id, body) => request(`/estimates/${id}`, { method: 'PUT', body }),
     send: (id, body) => request(`/estimates/${id}/send`, { method: 'POST', body })
+  },
+
+  /**
+   * NOAA weather, proxied by the backend.
+   *
+   * Separate from `radar`, which serves the map's own tiles and polygons.
+   * These endpoints answer `{ success, data, location }` rather than the
+   * `{ data, meta }` envelope the resource routers use, and a 503 here carries
+   * `WEATHER_UNAVAILABLE` - which is what lets the dashboard mark the forecast
+   * lane DEGRADED and keep its last reading rather than blanking the chart.
+   */
+  weather: {
+    status: (signal) => request('/weather/status', { signal }),
+    forecast: (params, signal) => request(`/weather/forecast${qs(params)}`, { signal }),
+    hourly: (params, signal) => request(`/weather/forecast/hourly${qs(params)}`, { signal }),
+    severe: (params, signal) => request(`/weather/severe${qs(params)}`, { signal })
   },
 
   radar: {

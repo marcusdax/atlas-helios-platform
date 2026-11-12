@@ -1,81 +1,13 @@
 const knex = require('knex');
-const path = require('node:path');
+const config = require('./db-config');
 
-// Absolute, so migrations resolve no matter which directory the process was
-// started from. Relative './migrations' silently resolved against the CWD,
-// which broke every runner that does not happen to launch from backend/.
-const MIGRATIONS = path.resolve(__dirname, '../migrations');
-const SEEDS = path.resolve(__dirname, '../seeds');
-
-const config = {
-  /**
-   * Tests run on an in-memory SQLite database.
-   *
-   * The alternative is requiring every contributor and every CI job to have a
-   * Postgres server before `npm test` does anything, which in practice means
-   * the API tests do not get run. The migration is written to work on both.
-   */
-  test: {
-    client: 'sqlite3',
-    connection: { filename: ':memory:' },
-    useNullAsDefault: true,
-    // One shared connection: a :memory: database exists per connection, so a
-    // pool of two would migrate one of them and query the other.
-    pool: {
-      min: 1,
-      max: 1,
-      afterCreate: (conn, done) => conn.run('PRAGMA foreign_keys = ON', done)
-    },
-    migrations: { directory: MIGRATIONS, tableName: 'knex_migrations' },
-    seeds: { directory: SEEDS }
-  },
-
-  development: {
-    client: 'postgresql',
-    connection: {
-      host: process.env.DB_HOST || 'localhost',
-      port: process.env.DB_PORT || 5432,
-      database: process.env.DB_NAME || 'atlas_helios_dev',
-      user: process.env.DB_USER || 'postgres',
-      password: process.env.DB_PASSWORD || 'password'
-    },
-    pool: {
-      min: 2,
-      max: 10
-    },
-    migrations: {
-      directory: MIGRATIONS,
-      tableName: 'knex_migrations'
-    },
-    seeds: {
-      directory: SEEDS
-    }
-  },
-  
-  production: {
-    client: 'postgresql',
-    connection: {
-      host: process.env.DB_HOST,
-      port: process.env.DB_PORT || 5432,
-      database: process.env.DB_NAME,
-      user: process.env.DB_USER,
-      password: process.env.DB_PASSWORD,
-      ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
-    },
-    pool: {
-      min: 2,
-      max: 20
-    },
-    migrations: {
-      directory: MIGRATIONS,
-      tableName: 'knex_migrations'
-    },
-    seeds: {
-      directory: SEEDS
-    }
-  }
-};
-
+/**
+ * The live Knex instance every router queries.
+ *
+ * The per-environment config lives in `./db-config`, which has no side
+ * effects, so the Knex CLI can read the same settings through `knexfile.js`
+ * without opening a connection pool that then keeps the process alive.
+ */
 const environment = process.env.NODE_ENV || 'development';
 const dbConfig = config[environment];
 
@@ -92,3 +24,13 @@ if (environment !== 'test') {
 }
 
 module.exports = database;
+
+/**
+ * The raw per-environment config, so `knexfile.js` can hand the CLI exactly
+ * what the server runs.
+ *
+ * Attached to the instance rather than exported separately because every
+ * existing consumer does `require('../config/database')` and uses the result
+ * as a query builder; changing that shape would touch every router.
+ */
+module.exports.knexConfig = config;

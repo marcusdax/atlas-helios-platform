@@ -191,6 +191,7 @@ in `frontend/src/data/dashboardGateway.js`:
 | `storms` | `GET /api/storms?status=active&limit=25` | `meta.total` → **Active Storms**, rows → activity |
 | `assessments` | `GET /api/assessments/history?since=-24h&limit=10` | `meta.total` → **Assessments (24h)**, rows → activity |
 | `alerts` | `GET /api/radar/alerts` | `meta.count` → **Weather Alerts**, features → activity |
+| `forecast` | `GET /api/storms/regions`, then `GET /api/weather/forecast/hourly?lat&lng` | 24 hourly points → **the precipitation chart**, plus its `source` |
 
 This keeps the change **additive**: no existing endpoint moves, nothing the
 mobile app or the public map reads changes, and no new backend contract has to be
@@ -213,8 +214,8 @@ every component stay exactly as they are. That seam is why this layer exists.
 
 | Suite | Command | Covers |
 |---|---|---|
-| Data layer (93 tests, no DOM) | `npm test --workspace=@atlas/dashboard-data` | state machine incl. an exhaustive 720-combination totality check, normalisers, cache, store integration, fixture/state agreement |
-| React layer (36 tests) | `cd frontend && npm test` | hook ↔ store wiring, cache hydration across mounts, provider short-circuit, gateway request shapes, per-state component rendering |
+| Data layer (100 tests, no DOM) | `npm test --workspace=@atlas/dashboard-data` | state machine incl. an exhaustive 720-combination totality check, normalisers, cache, store integration, fixture/state agreement |
+| React layer (51 tests) | `cd frontend && npm test` | hook ↔ store wiring, cache hydration across mounts, provider short-circuit, gateway request shapes, per-state component rendering |
 
 Both run from the repo root via `npm run test:all`.
 
@@ -278,22 +279,64 @@ beside it unused:
 | `contexts/PropertyContext.js` — mock properties and assessments, ~160 lines | **Deleted.** Nothing consumed `useProperty`. |
 | `components/maps/StormMap.js` — a Leaflet map with ten hardcoded addresses pinned around downtown Dallas | **Deleted.** The dashboard now renders `RadarMap` — animated NOAA radar, NWS warning polygons, real property pins — which already existed and which the Storm Intelligence page was already using. |
 | `components/layout/Sidebar.js` — twelve literal stats with invented trends (`'47'` / `'+12'`), three hardcoded activity sentences, and quick-action buttons whose handler was a `console.log` | **Rewritten** against the shared store, with per-lane "last known" marking. Links are router `Link`s to routes that exist; several of the old targets (`/property-assessment/new`, `/marketing`) never did. |
+| `components/ui/StormAlert.js` — a `mockAlert` (*"Severe hail storm detected with high damage probability"*, 47 properties, 2.5 inch hail) shown by `Math.random() < 0.3` on a 30-second timer, as a red full-width banner on every page | **Rewritten** to show the worst storm actually being tracked, from the same store, using the sentence the data layer already composed. Shows nothing when there is nothing, and dismissal is per storm so silencing one cannot silence the next. |
 
-The priority queue's rows now carry `latitude`/`longitude`, so the map pins and
-the dispatch list come from one read and cannot disagree about who the worst
-roof is. `toPropertyFeatures` in `@atlas/radar-map` accepts the domain model's
+The properties lane produces two lists from one read: `priorityProperties`, the
+worst few for the dispatch queue, and `mapProperties`, more rows with the
+ungeocoded ones dropped, for the map. One read means the pins and the queue can
+never disagree about who the worst roof is, and a property with no coordinates
+is dropped rather than drawn at 0,0 in the Gulf of Guinea. `toPropertyFeatures` in `@atlas/radar-map` accepts the domain model's
 `score` as well as the raw column's `damage_probability`, so one map component
 serves both callers without either reshaping for the other.
 
-### Still not real
+---
 
-`components/charts/PredictionChart.js` — the entire ECharts series is a literal
-array, and there is no forecast endpoint to point it at. `StormService` reads
-the NWS hourly forecast internally to detect severe conditions but never
-exposes it, so a real chart needs a backend endpoint first — a change worth its
-own review, not a guess.
+## The weather lane, and why the backend had to change first
 
-Until then the panel is **labelled**: *"Sample shape only — no forecast feed is
-connected yet."* An unlabelled chart of invented numbers under the heading
-"24-Hour Weather Forecast" is the same defect as the mock tiles, and the
-cheapest honest answer is to say so on the panel.
+`PredictionChart` was two stacked ECharts series named "Storm Probability" and
+"Hail Risk", both literal arrays of twelve numbers, under a heading that read
+"24-Hour Weather Forecast". They were also *stacked*, so the shape on screen was
+the sum of two invented probabilities — a quantity with no meaning.
+
+Pointing it at `/api/weather/forecast/hourly` was not enough on its own, because
+**`NOAAWeatherService` silently substituted fabricated data on every failure
+path**. A forecast, an hourly forecast, an area alert and a severe-weather check
+all fell back to a mock generator and returned it through the same field as a
+real response. The worst instance: `/api/weather/alerts` would serve an invented
+
+> Severe Thunderstorm Warning … Take shelter immediately. Move to an interior
+> room on the lowest floor.
+
+that no meteorologist had issued. Wiring a chart to that would only have moved
+the lie one layer up.
+
+So the service reports failures as failures:
+
+- Every successful payload is stamped `source: 'nws'`.
+- A failure throws `WEATHER_UNAVAILABLE`, which the routes answer as **503 with
+  that code** — so the dashboard marks one lane DEGRADED and keeps its last
+  reading, instead of treating an upstream outage as a bug.
+- `WEATHER_ALLOW_MOCK=true` brings the generator back for demos, and even then
+  the payload is stamped `source: 'mock'` so the chart can label itself.
+- **Alerts never fabricate, flag or no flag.** A warning that tells a person to
+  take shelter is not a degraded experience if it is invented; it is a hazard.
+- A severe-weather check never answers from a guess either: `isSevere: false`
+  from a fabricated payload reads as an all-clear nobody checked.
+
+### Where the forecast is for
+
+The endpoint wants a point, and the honest answer to "which point" was already
+in the database. `monitoring_regions` is the list of metros Atlas polls for
+severe weather, so the gateway forecasts the first of them. An explicit
+`location` option wins; `REACT_APP_DEFAULT_LAT`/`LNG` is the last resort. With
+neither, the panel says *"No monitored region is configured, so there is nowhere
+to forecast for"* rather than quietly forecasting a city nobody chose.
+
+### One measure, one axis
+
+The chart plots precipitation probability and nothing else. Wind is mph and
+probability is a percentage; putting both on one plot needs two y-scales, and a
+dual-axis chart invites the reader to infer a correlation from wherever the two
+scalings happen to cross. Peak wind is a **number beside the title** instead,
+which is the right form for a single value. Nothing is stacked, and only the
+peak hour carries a label — a number on every point is noise.

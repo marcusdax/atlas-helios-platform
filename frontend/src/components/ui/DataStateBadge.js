@@ -172,8 +172,12 @@ export function DataStateBadge({
 }
 
 /** A shimmering placeholder, for SYNCING where there is nothing to show yet. */
-export const Skeleton = ({ className = '' }) => (
-  <span className={`block animate-pulse rounded bg-neutral-700/60 ${className}`} aria-hidden="true" />
+export const Skeleton = ({ className = '', ...rest }) => (
+  <span
+    {...rest}
+    className={`block animate-pulse rounded bg-neutral-700/60 ${className}`}
+    aria-hidden="true"
+  />
 );
 
 /**

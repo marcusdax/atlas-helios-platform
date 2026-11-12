@@ -4,6 +4,7 @@
  */
 
 import axios from 'axios';
+import { getToken, setToken } from '../lib/api';
 
 // Base API URL - uses proxy in development
 const API_URL = process.env.REACT_APP_API_URL || '';
@@ -17,10 +18,17 @@ const api = axios.create({
   timeout: 30000,
 });
 
-// Request interceptor to add auth token
+/**
+ * One token, read through `lib/api`.
+ *
+ * This client used to keep the session under its own `accessToken` key while
+ * `lib/api.js` - what the dashboard's data layer uses - kept it under
+ * `atlas.access_token`. Two clients, two keys, so signing in satisfied only
+ * whichever half of the app happened to have written the token.
+ */
 api.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem('accessToken');
+    const token = getToken();
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
@@ -29,15 +37,26 @@ api.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
-// Response interceptor for error handling
+/**
+ * A 401 clears the session. It does not navigate.
+ *
+ * This interceptor used to do `window.location.href = '/login'`, and there is
+ * no `/login` route in this application - so the first unauthenticated request
+ * hard-navigated the whole app to a blank page. `PropertyContext` fetches on
+ * mount, globally, which meant anyone arriving without a valid token saw
+ * nothing at all and had no way back.
+ *
+ * Clearing the token and rejecting is enough: the dashboard's data layer turns
+ * a failed read into an honest DEGRADED or OFFLINE state with a Retry, which
+ * is strictly more useful than a redirect to a route that does not exist. When
+ * a real sign-in screen lands, this is the place to send people to it.
+ */
 api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      // Token expired or invalid
-      localStorage.removeItem('accessToken');
-      localStorage.removeItem('refreshToken');
-      window.location.href = '/login';
+      setToken(null);
+      try { localStorage.removeItem('refreshToken'); } catch { /* private mode */ }
     }
     return Promise.reject(error);
   }
