@@ -18,6 +18,41 @@ try {
 }
 
 /**
+ * Report a Nexus failure without misreporting it or leaking the estate.
+ *
+ * Every handler here used to end `res.status(500).json({ error: error.message })`,
+ * which got two things wrong at once. Nexus runs as a separate service, so when
+ * it is simply not running the request failed for want of a *dependency* - a
+ * 503, something the caller can sensibly retry - not because this server broke.
+ * And `error.message` for a refused connection is literally
+ * `connect ECONNREFUSED 127.0.0.1:5051`, so the browser was being handed the
+ * internal address and port of a backend service by any unauthenticated caller
+ * who could reach the route.
+ *
+ * Connection-shaped failures therefore become a 503 carrying a stable code and
+ * a sentence meant for a person. Anything else stays a 500, logged in full here
+ * but reported to the caller as a generic failure.
+ */
+const UNREACHABLE = new Set([
+  'ECONNREFUSED', 'ENOTFOUND', 'ECONNRESET', 'EHOSTUNREACH', 'ETIMEDOUT', 'EAI_AGAIN'
+]);
+
+const failNexus = (res, error, what) => {
+  const cause = error?.code || error?.cause?.code;
+
+  if (UNREACHABLE.has(cause) || error?.name === 'AbortError') {
+    logger.warn(`${what}: Nexus is unreachable (${cause || error?.name})`);
+    return res.status(503).json({
+      error: 'The Nexus analysis service is not reachable.',
+      code: 'NEXUS_UNAVAILABLE'
+    });
+  }
+
+  logger.error(`${what}:`, error?.message || error);
+  return res.status(500).json({ error: 'Request failed', code: 'INTERNAL_ERROR' });
+};
+
+/**
  * @route   GET /api/nexus/status
  * @desc    Get Nexus Mind integration status
  * @access  Public
@@ -37,8 +72,7 @@ router.get('/status', async (req, res) => {
       ...status
     });
   } catch (error) {
-    logger.error('Error getting Nexus Mind status:', error);
-    res.status(500).json({ error: error.message });
+    return failNexus(res, error, 'Error getting Nexus Mind status');
   }
 });
 
@@ -66,8 +100,7 @@ router.post('/storm/analyze', authMiddleware, async (req, res) => {
       enhanced: !result.fallback
     });
   } catch (error) {
-    logger.error('Storm analysis error:', error);
-    res.status(500).json({ error: error.message });
+    return failNexus(res, error, 'Storm analysis error');
   }
 });
 
@@ -95,8 +128,7 @@ router.post('/property/analyze', authMiddleware, async (req, res) => {
       enhanced: !result.fallback
     });
   } catch (error) {
-    logger.error('Property analysis error:', error);
-    res.status(500).json({ error: error.message });
+    return failNexus(res, error, 'Property analysis error');
   }
 });
 
@@ -129,8 +161,7 @@ router.post('/vision/classify', authMiddleware, async (req, res) => {
       data: result
     });
   } catch (error) {
-    logger.error('Image classification error:', error);
-    res.status(500).json({ error: error.message });
+    return failNexus(res, error, 'Image classification error');
   }
 });
 
@@ -163,8 +194,7 @@ router.post('/cognitive/process', authMiddleware, async (req, res) => {
       data: result
     });
   } catch (error) {
-    logger.error('Cognitive processing error:', error);
-    res.status(500).json({ error: error.message });
+    return failNexus(res, error, 'Cognitive processing error');
   }
 });
 
@@ -184,8 +214,7 @@ router.get('/config', authMiddleware, async (req, res) => {
     const config = await NexusMindIntegration.getConfig();
     res.json(config);
   } catch (error) {
-    logger.error('Error getting Nexus config:', error);
-    res.status(500).json({ error: error.message });
+    return failNexus(res, error, 'Error getting Nexus config');
   }
 });
 
