@@ -89,6 +89,12 @@ class DashboardStore {
     this.fromCache = false;
     this.fetchedAt = null;
     this.disposed = false;
+    /**
+     * Bumped by every `dispose()`. A read captures the generation it began in
+     * and discards its own result if the store was closed and re-opened while
+     * it was in flight, so an aborted read can never land on a live store.
+     */
+    this.generation = 0;
 
     /** @type {import('./types').StateTransition[]} */
     this.history = [];
@@ -277,13 +283,14 @@ class DashboardStore {
 
     this.controller = typeof AbortController === 'function' ? new AbortController() : null;
     const signal = this.controller ? this.controller.signal : undefined;
+    const generation = this.generation;
 
     this.fetching = true;
     this.commit('refresh started');
 
     const run = (async () => {
       const settled = await Promise.allSettled(names.map((name) => this.gateway[name](signal)));
-      if (this.disposed) return this.view;
+      if (this.disposed || generation !== this.generation) return this.view;
 
       const at = this.now();
       let anyOk = false;
@@ -414,12 +421,44 @@ class DashboardStore {
 
   /* ---------------------------------------------------------------- life -- */
 
+  /**
+   * Stop all work: cancel the debounce, abort the read in flight, drop the
+   * subscribers. Reversible by `activate()`.
+   */
   dispose() {
     this.disposed = true;
+    this.generation += 1;
     if (this.pushTimer !== null) this.scheduler.clearTimeout(this.pushTimer);
     this.pushTimer = null;
     if (this.controller) this.controller.abort();
+    this.controller = null;
+    // Deliberately forgotten rather than awaited. Its `finally` still runs, but
+    // it no longer owns `inflight`, so it cannot clear a later read's entry -
+    // and `refresh()` joins `inflight` when it is set, so a store re-opened
+    // while the abort was still propagating would otherwise hand the next
+    // caller the doomed promise and fetch nothing.
+    this.inflight = null;
+    this.fetching = false;
     this.listeners.clear();
+  }
+
+  /**
+   * Re-open a store that `dispose()` closed.
+   *
+   * React's StrictMode runs an effect, its cleanup, and then the effect again,
+   * against the same memoised store. A `dispose()` that could not be undone
+   * turned that development-only rehearsal into a permanent outage: every
+   * later `hydrate()` and `refresh()` returned early and the dashboard sat in
+   * SYNCING forever, having issued the requests but discarded every response.
+   * It reproduced only under `npm start`, because a production build does not
+   * double-invoke - which is precisely the kind of gap a reversible teardown
+   * closes. Cleanup has to be undoable, and this is the other half of it.
+   *
+   * Idempotent, so an effect may call it on every run.
+   */
+  activate() {
+    if (!this.disposed) return;
+    this.disposed = false;
   }
 }
 

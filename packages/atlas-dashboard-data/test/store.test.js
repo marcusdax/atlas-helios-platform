@@ -497,3 +497,64 @@ test('activity is bounded by the configured limit', async () => {
   await store.refresh();
   assert.equal(store.getView().activity.length, 4);
 });
+
+/* ------------------------------------------------------------ lifecycle -- */
+
+test('a disposed store re-opens, so a StrictMode remount still loads', async () => {
+  const calls = {};
+  const store = connected(new DashboardStore({ gateway: gateway({ calls }), now: clock().now }));
+
+  // Exactly what React does in development: effect, cleanup, effect again -
+  // all against the one memoised store.
+  store.activate(); store.hydrate(); const first = store.refresh();
+  store.dispose();
+  store.activate(); store.hydrate(); await store.refresh();
+  await first.catch(() => {});
+
+  const view = store.getView();
+  assert.equal(view.state, DATA_STATES.LIVE, 'a remounted store must still reach LIVE');
+  assert.equal(view.summary.totalProperties, 1284);
+  assert.ok(view.fetchedAt !== null, 'the second read has to be allowed to land');
+});
+
+test('activate is idempotent and leaves a live store alone', async () => {
+  const store = connected(new DashboardStore({ gateway: gateway(), now: clock().now }));
+  await store.refresh();
+  const before = store.getView();
+  store.activate();
+  store.activate();
+  assert.equal(store.getView(), before, 'activating a live store must not churn the view');
+});
+
+test('a read aborted by dispose cannot land on the re-opened store', async () => {
+  let release;
+  const stalled = new Promise((resolve) => { release = resolve; });
+  let pass = 0;
+
+  const store = connected(new DashboardStore({
+    now: clock().now,
+    gateway: {
+      // First pass hangs until released, then answers with a total that must
+      // never be displayed; the second pass answers normally.
+      properties: async () => {
+        pass += 1;
+        if (pass === 1) { await stalled; return { total: { data: [], meta: { total: 999 } }, highRisk: { meta: { total: 0 }, data: [] } }; }
+        return payloads.properties;
+      }
+    }
+  }));
+
+  const abandoned = store.refresh();   // generation 0
+  store.dispose();                     // aborts it, bumps the generation
+  store.activate();
+  await store.refresh();               // generation 1, lands normally
+
+  release();
+  await abandoned.catch(() => {});
+  await Promise.resolve();
+
+  assert.equal(
+    store.getView().summary.totalProperties, 1284,
+    'the superseded read must not overwrite the current one'
+  );
+});

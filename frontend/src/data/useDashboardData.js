@@ -157,6 +157,12 @@ export function useLiveDashboardData({
   /* First paint from cache, then the first read. */
   useEffect(() => {
     if (!store) return undefined;
+    // `activate` before `hydrate`, because this effect can run a second time
+    // on the same store: StrictMode rehearses mount/unmount/mount in
+    // development, and the cleanup below closes the store. Without re-opening
+    // it, the second run's reads would be discarded and the dashboard would
+    // never leave SYNCING - in development only.
+    store.activate();
     store.hydrate();
     store.refresh();
     return () => store.dispose();

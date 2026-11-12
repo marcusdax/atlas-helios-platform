@@ -60,7 +60,14 @@
       "last 1 safari version"
     ]
   },
-  "proxy": "http://localhost:5000",
+  "_proxyComment": [
+    "The dev-server proxy lives in src/setupProxy.js, not here. A \"proxy\" field",
+    "switches on react-scripts' dev-server host check, which derives its one",
+    "allowed host from the machine's LAN address; where that address is outside",
+    "the private ranges (containers, CI, many cloud VMs) it resolves to undefined",
+    "and the dev server refuses to start. setupProxy.js forwards the same paths",
+    "without engaging that check."
+  ],
   "_jestComment": [
     "react-router-dom@7 re-exports from the subpath 'react-router/dom'. Webpack honours",
     "the package's exports map and resolves it; the jest-resolve bundled with",
