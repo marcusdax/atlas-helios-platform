@@ -1,6 +1,12 @@
 const jwt = require('jsonwebtoken');
 const db = require('../../config/database');
 const logger = require('../utils/logger');
+/*
+  Resolved once at boot rather than read per request: an unset JWT_SECRET used
+  to surface as a 500 on every sign-in from a server that reported healthy.
+  See config/secrets.js.
+*/
+const { accessSecret, refreshSecret } = require('../../config/secrets');
 
 /**
  * JWT Authentication Middleware
@@ -19,7 +25,7 @@ const authMiddleware = async (req, res, next) => {
     const token = authHeader.substring(7); // Remove 'Bearer ' prefix
 
     // Verify token
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = jwt.verify(token, accessSecret);
     
     // Get user from database
     // `status` must be selected: the check below compares against it, and
@@ -140,7 +146,7 @@ const optionalAuth = async (req, res, next) => {
     
     if (authHeader && authHeader.startsWith('Bearer ')) {
       const token = authHeader.substring(7);
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      const decoded = jwt.verify(token, accessSecret);
       
       const user = await db('users')
         .select('id', 'email', 'name', 'role', 'company_id')
@@ -170,7 +176,7 @@ const generateToken = (userId, role = 'user') => {
       role,
       iat: Math.floor(Date.now() / 1000)
     },
-    process.env.JWT_SECRET,
+    accessSecret,
     { 
       expiresIn: process.env.JWT_EXPIRES_IN || '24h',
       issuer: 'atlas-helios-platform',
@@ -189,7 +195,7 @@ const generateRefreshToken = (userId) => {
       type: 'refresh',
       iat: Math.floor(Date.now() / 1000)
     },
-    process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET,
+    refreshSecret,
     { 
       expiresIn: '7d',
       issuer: 'atlas-helios-platform',
@@ -202,7 +208,7 @@ const generateRefreshToken = (userId) => {
  * Verify refresh token
  */
 const verifyRefreshToken = (token) => {
-  return jwt.verify(token, process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET);
+  return jwt.verify(token, refreshSecret);
 };
 
 module.exports = {
