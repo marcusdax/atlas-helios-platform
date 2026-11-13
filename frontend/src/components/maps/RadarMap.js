@@ -12,9 +12,10 @@ import {
   RadarTimeline, RadarLanes,
   toAlertFeatures, alertLayers,
   toPropertyFeatures, propertyLayers,
-  BASEMAPS, RISK_BANDS
+  RISK_BANDS
 } from '@atlas/radar-map';
 import { api, messageFor } from '../../lib/api';
+import { basemaps, ensurePmtilesProtocol, basemapNotice } from '../../lib/basemapConfig';
 
 /**
  * The storm map.
@@ -52,10 +53,19 @@ export default function RadarMap({
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return undefined;
 
-    const spec = BASEMAPS[basemap] || BASEMAPS.dark;
+    // Must run before the map is constructed: the protocol handler is what
+    // turns a pmtiles:// source into range requests against the archive.
+    ensurePmtilesProtocol();
+
+    const spec = basemaps[basemap] || basemaps.dark;
     const map = new maplibregl.Map({
       container: containerRef.current,
-      style: spec.styleUrl || {
+      /*
+        Three shapes, one map. A hosted provider gives a style URL; a PMTiles
+        archive gives a style object already pointed at pmtiles://; raster
+        imagery gives tiles that have to be wrapped in a style here.
+      */
+      style: spec.styleUrl || spec.style || {
         version: 8,
         sources: { base: { type: 'raster', ...spec.raster, attribution: spec.attribution } },
         layers: [{ id: 'base', type: 'raster', source: 'base' }]
@@ -292,6 +302,15 @@ export default function RadarMap({
             </span>
           ))}
         </span>
+        {/*
+          Which host the tiles came from, named rather than implied. OSM data
+          is ODbL and requires attribution; MapLibre's own control carries it
+          on the canvas, and this says who served it.
+        */}
+        <span className="font-mono text-[10px] uppercase tracking-wide text-neutral-600">
+          {basemaps.meta.provider === 'pmtiles' ? 'tiles: self-hosted pmtiles' : 'tiles: openfreemap'}
+        </span>
+        {basemapNotice() && <span className="text-amber-400">{basemapNotice()}</span>}
         {error && <span className="text-amber-400">{error}</span>}
       </div>
     </div>

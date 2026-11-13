@@ -66,39 +66,6 @@ const RADAR_PROVIDERS = {
   }
 };
 
-/**
- * Basemaps. Vector where possible: a field rep zooms to a single roof, and a
- * raster basemap turns to mush three zoom levels before the work is visible.
- */
-const BASEMAPS = {
-  streets: {
-    id: 'streets',
-    label: 'Streets',
-    styleUrl: 'https://tiles.openfreemap.org/styles/liberty',
-    attribution: 'OpenFreeMap · OpenStreetMap contributors'
-  },
-  dark: {
-    id: 'dark',
-    label: 'Dark',
-    styleUrl: 'https://tiles.openfreemap.org/styles/dark',
-    attribution: 'OpenFreeMap · OpenStreetMap contributors'
-  },
-  /**
-   * USGS imagery: the only basemap on which roof condition is legible, which
-   * is what an adjuster actually wants behind a damage overlay.
-   */
-  imagery: {
-    id: 'imagery',
-    label: 'Aerial imagery',
-    raster: {
-      tiles: ['https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}'],
-      tileSize: 256,
-      maxzoom: 16
-    },
-    attribution: 'USGS The National Map'
-  }
-};
-
 /** NWS watches, warnings and advisories — polygons, updated continuously. */
 const ALERTS_ENDPOINT = 'https://api.weather.gov/alerts/active';
 
@@ -133,6 +100,10 @@ const severityOf = (alert) =>
 /** True when an alert is the kind Atlas should raise a lead against. */
 const isActionable = (alert) =>
   ACTIONABLE_EVENTS.includes(alert?.properties?.event) || severityOf(alert).rank >= 3;
+
+// Basemaps moved to ./basemaps.js when the self-hosted PMTiles provider was
+// added; re-exported here so existing importers keep working.
+const { BASEMAPS } = require('./basemaps');
 
 module.exports = {
   RADAR_PROVIDERS,
