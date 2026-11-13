@@ -1,535 +1,341 @@
-import React, { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
+import React, { useMemo, useState } from 'react';
 import toast from 'react-hot-toast';
+import { api, messageFor } from '../lib/api';
+import { useApi, useAction } from '../lib/useApi';
+import {
+  PageHeader, Card, Button, Input, TextArea, Field, control,
+  AsyncState, Table, Badge, Alert, money, when
+} from '../components/ui/kit';
 
-const EstimateGenerator = () => {
-  const [estimates, setEstimates] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [, setSelectedEstimate] = useState(null);
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [lineItems, setLineItems] = useState([]);
-  const [estimateData, setEstimateData] = useState({
-    propertyId: '',
-    clientId: '',
-    title: '',
-    description: '',
-    laborRate: 75,
-    taxRate: 8.5,
-    discountRate: 0
-  });
+/**
+ * Estimates.
+ *
+ * The old page listed a hardcoded `mockEstimates` array and "created" an
+ * estimate by pushing an object onto it, so every figure on screen was invented
+ * and nothing survived a reload.
+ *
+ * The money is the part worth being careful about. The old form priced an
+ * estimate in the browser as `subtotal + subtotal * (taxRate / 100) -
+ * subtotal * (discountRate / 100)`, in floating point. The API prices in
+ * integer cents, applies overhead and profit to the subtotal *before* tax, and
+ * has no notion of a discount at all - so the number the old form showed could
+ * not be produced by the server under any input.
+ *
+ * This page therefore does not compute a total. It previews the subtotal, which
+ * is an unambiguous sum, and states which rates the server will apply; the
+ * authoritative subtotal, overhead, profit, tax and total come back from the
+ * save and are what the table shows. Reimplementing the server's rounding here
+ * would mean two pricing engines that agree until the day they do not, and a
+ * penny of disagreement on a roof estimate is what an adjuster queries.
+ */
 
-  useEffect(() => {
-    fetchEstimates();
-  }, []);
+const STATUSES = ['draft', 'sent', 'viewed', 'accepted', 'declined', 'expired'];
+const CATEGORIES = ['roofing', 'siding', 'gutters', 'windows', 'interior', 'labor', 'materials', 'other'];
 
-  const fetchEstimates = async () => {
-    try {
-      setLoading(true);
-      // Mock data - replace with actual API call
-      const mockEstimates = [
-        {
-          id: 1,
-          title: 'Roof Repair - Hurricane Damage',
-          propertyAddress: '123 Main St, Miami, FL',
-          clientName: 'John Smith',
-          status: 'draft',
-          total: 15420.50,
-          createdAt: '2024-01-15T10:00:00Z',
-          expiresAt: '2024-02-15T10:00:00Z',
-          lineItems: [
-            { id: 1, description: 'Roof decking replacement', quantity: 1500, unitPrice: 12.50, category: 'materials' },
-            { id: 2, description: 'Asphalt shingles', quantity: 1500, unitPrice: 3.75, category: 'materials' },
-            { id: 3, description: 'Labor installation', quantity: 40, unitPrice: 75.00, category: 'labor' }
-          ]
-        },
-        {
-          id: 2,
-          title: 'Window Replacement',
-          propertyAddress: '456 Ocean Ave, Key West, FL',
-          clientName: 'Sarah Johnson',
-          status: 'sent',
-          total: 8750.00,
-          createdAt: '2024-01-14T09:00:00Z',
-          expiresAt: '2024-02-14T09:00:00Z'
-        }
-      ];
-      setEstimates(mockEstimates);
-    } catch (error) {
-      toast.error('Failed to fetch estimates');
-    } finally {
-      setLoading(false);
-    }
-  };
+const STATUS_TONE = {
+  draft: 'neutral', sent: 'info', viewed: 'info',
+  accepted: 'good', declined: 'bad', expired: 'warn'
+};
 
-  const handleCreateEstimate = async (e) => {
-    e.preventDefault();
-    try {
-      const subtotal = calculateSubtotal();
-      const taxAmount = subtotal * (estimateData.taxRate / 100);
-      const discountAmount = subtotal * (estimateData.discountRate / 100);
-      const total = subtotal + taxAmount - discountAmount;
+const humanize = (s) => String(s || '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 
-      const newEstimate = {
-        id: estimates.length + 1,
-        ...estimateData,
-        lineItems,
-        status: 'draft',
-        subtotal,
-        taxAmount,
-        discountAmount,
-        total,
-        createdAt: new Date().toISOString(),
-        expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
-      };
+const ALL = 'all';
 
-      setEstimates([newEstimate, ...estimates]);
-      setShowCreateModal(false);
-      resetEstimateForm();
-      toast.success('Estimate created successfully');
-    } catch (error) {
-      toast.error('Failed to create estimate');
-    }
-  };
+export default function EstimateGenerator() {
+  const [status, setStatus] = useState(ALL);
+  const [showCreate, setShowCreate] = useState(false);
 
-  const addLineItem = () => {
-    const newItem = {
-      id: Date.now(),
-      description: '',
-      quantity: 1,
-      unitPrice: 0,
-      category: 'materials'
-    };
-    setLineItems([...lineItems, newItem]);
-  };
+  const estimates = useApi(
+    (signal) => api.estimates.list({ status: status === ALL ? undefined : status, limit: 100 }, signal),
+    [status]
+  );
 
-  const updateLineItem = (id, field, value) => {
-    setLineItems(lineItems.map(item => 
-      item.id === id ? { ...item, [field]: value } : item
-    ));
-  };
+  const rows = useMemo(() => estimates.data?.data ?? [], [estimates.data]);
 
-  const removeLineItem = (id) => {
-    setLineItems(lineItems.filter(item => item.id !== id));
-  };
-
-  const calculateSubtotal = () => {
-    return lineItems.reduce((total, item) => total + (item.quantity * item.unitPrice), 0);
-  };
-
-  const resetEstimateForm = () => {
-    setEstimateData({
-      propertyId: '',
-      clientId: '',
-      title: '',
-      description: '',
-      laborRate: 75,
-      taxRate: 8.5,
-      discountRate: 0
-    });
-    setLineItems([]);
-  };
-
-  const getStatusColor = (status) => {
-    const colors = {
-      'draft': 'text-gray-400 bg-gray-900/20 border-gray-800',
-      'sent': 'text-blue-400 bg-blue-900/20 border-blue-800',
-      'accepted': 'text-green-400 bg-green-900/20 border-green-800',
-      'rejected': 'text-red-400 bg-red-900/20 border-red-800',
-      'expired': 'text-yellow-400 bg-yellow-900/20 border-yellow-800'
-    };
-    return colors[status] || 'text-gray-400 bg-gray-900/20 border-gray-800';
-  };
-
-  const formatCurrency = (amount) => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD'
-    }).format(amount);
-  };
-
-  const subtotal = calculateSubtotal();
-  const taxAmount = subtotal * (estimateData.taxRate / 100);
-  const discountAmount = subtotal * (estimateData.discountRate / 100);
-  const total = subtotal + taxAmount - discountAmount;
+  const totals = useMemo(() => ({
+    count: estimates.data?.meta?.total ?? rows.length,
+    draft: rows.filter((e) => e.status === 'draft').length,
+    accepted: rows.filter((e) => e.status === 'accepted').length,
+    // Only accepted work is money the company can count on, so the headline
+    // figure is deliberately not the sum of every estimate ever drafted.
+    acceptedValue: rows.filter((e) => e.status === 'accepted')
+      .reduce((sum, e) => sum + (Number(e.total) || 0), 0)
+  }), [rows, estimates.data]);
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <motion.div
-        initial={{ opacity: 0, y: -20 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="flex justify-between items-center"
+      <PageHeader
+        title="Estimates"
+        subtitle="Priced by the API in integer cents: overhead and profit are applied to the subtotal, then tax."
+        actions={<Button onClick={() => setShowCreate(true)}>New estimate</Button>}
+      />
+
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+        {[
+          ['Estimates', estimates.loading ? '—' : totals.count],
+          ['Draft', estimates.loading ? '—' : totals.draft],
+          ['Accepted', estimates.loading ? '—' : totals.accepted],
+          ['Accepted value', estimates.loading ? '—' : money(totals.acceptedValue)]
+        ].map(([label, value]) => (
+          <Card key={label}>
+            <div className="text-2xl font-bold tabular-nums text-neutral-100">{value}</div>
+            <div className="text-sm text-neutral-400">{label}</div>
+          </Card>
+        ))}
+      </div>
+
+      <Card
+        title="All estimates"
+        actions={
+          <div className="flex items-end gap-2">
+            <select
+              aria-label="Filter by status" className={control} value={status}
+              onChange={(e) => setStatus(e.target.value)} style={{ width: 'auto' }}
+            >
+              <option value={ALL}>All statuses</option>
+              {STATUSES.map((s) => <option key={s} value={s}>{humanize(s)}</option>)}
+            </select>
+            <Button tone="ghost" onClick={estimates.reload} busy={estimates.loading}>Refresh</Button>
+          </div>
+        }
       >
-        <div>
-          <h1 className="text-3xl font-bold text-white mb-2">Estimate Generator</h1>
-          <p className="text-neutral-400">Create and manage property repair estimates</p>
-        </div>
-        
-        <motion.button
-          whileHover={{ scale: 1.02 }}
-          whileTap={{ scale: 0.98 }}
-          onClick={() => setShowCreateModal(true)}
-          className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors"
+        <AsyncState
+          loading={estimates.loading}
+          error={estimates.error}
+          empty={rows.length === 0}
+          emptyMessage="No estimates yet."
         >
-          New Estimate
-        </motion.button>
-      </motion.div>
-
-      {/* Statistics */}
-      <motion.div
-        initial={{ opacity: 0, y: -10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.1 }}
-        className="grid grid-cols-1 md:grid-cols-4 gap-4"
-      >
-        <div className="bg-neutral-900 rounded-lg border border-neutral-800 p-4">
-          <div className="text-2xl font-bold text-blue-400">{estimates.length}</div>
-          <div className="text-sm text-neutral-400">Total Estimates</div>
-        </div>
-        <div className="bg-neutral-900 rounded-lg border border-neutral-800 p-4">
-          <div className="text-2xl font-bold text-green-400">
-            {estimates.filter(e => e.status === 'accepted').length}
-          </div>
-          <div className="text-sm text-neutral-400">Accepted</div>
-        </div>
-        <div className="bg-neutral-900 rounded-lg border border-neutral-800 p-4">
-          <div className="text-2xl font-bold text-yellow-400">
-            {estimates.filter(e => e.status === 'sent').length}
-          </div>
-          <div className="text-sm text-neutral-400">Pending</div>
-        </div>
-        <div className="bg-neutral-900 rounded-lg border border-neutral-800 p-4">
-          <div className="text-2xl font-bold text-purple-400">
-            {formatCurrency(estimates.reduce((sum, e) => sum + e.total, 0))}
-          </div>
-          <div className="text-sm text-neutral-400">Total Value</div>
-        </div>
-      </motion.div>
-
-      {/* Estimates List */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.3 }}
-        className="bg-neutral-900 rounded-lg border border-neutral-800"
-      >
-        <div className="p-4 border-b border-neutral-800">
-          <h2 className="text-xl font-semibold text-white">Recent Estimates</h2>
-        </div>
-        
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-neutral-800">
-                <th className="text-left p-4 text-neutral-400 font-medium">Estimate</th>
-                <th className="text-left p-4 text-neutral-400 font-medium">Client</th>
-                <th className="text-left p-4 text-neutral-400 font-medium">Property</th>
-                <th className="text-left p-4 text-neutral-400 font-medium">Total</th>
-                <th className="text-left p-4 text-neutral-400 font-medium">Status</th>
-                <th className="text-left p-4 text-neutral-400 font-medium">Expires</th>
-                <th className="text-left p-4 text-neutral-400 font-medium">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                <tr>
-                  <td colSpan="7" className="text-center p-8">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto"></div>
-                  </td>
-                </tr>
-              ) : estimates.length === 0 ? (
-                <tr>
-                  <td colSpan="7" className="text-center p-8 text-neutral-500">
-                    No estimates found
-                  </td>
-                </tr>
-              ) : (
-                estimates.map((estimate) => (
-                  <motion.tr
-                    key={estimate.id}
-                    initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    whileHover={{ backgroundColor: 'rgba(59, 130, 246, 0.05)' }}
-                    className="border-b border-neutral-800 cursor-pointer transition-colors"
-                    onClick={() => setSelectedEstimate(estimate)}
-                  >
-                    <td className="p-4">
-                      <div>
-                        <div className="font-medium text-white">{estimate.title}</div>
-                        <div className="text-sm text-neutral-400">
-                          Created {new Date(estimate.createdAt).toLocaleDateString()}
-                        </div>
-                      </div>
-                    </td>
-                    <td className="p-4">
-                      <div className="text-white">{estimate.clientName}</div>
-                    </td>
-                    <td className="p-4">
-                      <div className="text-sm text-white max-w-xs truncate">
-                        {estimate.propertyAddress}
-                      </div>
-                    </td>
-                    <td className="p-4">
-                      <div className="font-bold text-white">
-                        {formatCurrency(estimate.total)}
-                      </div>
-                    </td>
-                    <td className="p-4">
-                      <span className={`px-2 py-1 text-xs rounded-full border ${getStatusColor(estimate.status)}`}>
-                        {estimate.status}
-                      </span>
-                    </td>
-                    <td className="p-4">
-                      <div className="text-sm text-neutral-400">
-                        {new Date(estimate.expiresAt).toLocaleDateString()}
-                      </div>
-                    </td>
-                    <td className="p-4">
-                      <div className="flex gap-2">
-                        <button className="text-blue-400 hover:text-blue-300 text-sm">
-                          Edit
-                        </button>
-                        <button className="text-green-400 hover:text-green-300 text-sm">
-                          Send
-                        </button>
-                        <button className="text-purple-400 hover:text-purple-300 text-sm">
-                          PDF
-                        </button>
-                      </div>
-                    </td>
-                  </motion.tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </motion.div>
-
-      {/* Create Estimate Modal */}
-      {showCreateModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto">
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="bg-neutral-900 rounded-lg border border-neutral-800 p-6 w-full max-w-4xl mx-4 max-h-[90vh] overflow-y-auto"
-          >
-            <h3 className="text-xl font-semibold text-white mb-4">Create New Estimate</h3>
-            
-            <form onSubmit={handleCreateEstimate} className="space-y-6">
-              {/* Basic Information */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-neutral-400 mb-2">Estimate Title</label>
-                  <input
-                    type="text"
-                    value={estimateData.title}
-                    onChange={(e) => setEstimateData({ ...estimateData, title: e.target.value })}
-                    className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="e.g., Roof Repair - Hurricane Damage"
-                    required
-                  />
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-neutral-400 mb-2">Client Name</label>
-                  <input
-                    type="text"
-                    value={estimateData.clientId}
-                    onChange={(e) => setEstimateData({ ...estimateData, clientId: e.target.value })}
-                    className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="Client name"
-                    required
-                  />
-                </div>
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-neutral-400 mb-2">Description</label>
-                <textarea
-                  value={estimateData.description}
-                  onChange={(e) => setEstimateData({ ...estimateData, description: e.target.value })}
-                  className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  rows={3}
-                  placeholder="Detailed description of the work to be performed..."
-                />
-              </div>
-
-              {/* Line Items */}
-              <div>
-                <div className="flex justify-between items-center mb-4">
-                  <h4 className="text-lg font-medium text-white">Line Items</h4>
-                  <button
-                    type="button"
-                    onClick={addLineItem}
-                    className="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded-lg text-sm transition-colors"
-                  >
-                    Add Item
-                  </button>
-                </div>
-                
-                {lineItems.length === 0 ? (
-                  <div className="text-center py-8 bg-neutral-800 rounded-lg">
-                    <p className="text-neutral-400 mb-4">No line items added yet</p>
-                    <button
-                      type="button"
-                      onClick={addLineItem}
-                      className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors"
-                    >
-                      Add First Item
-                    </button>
+          <Table
+            columns={[
+              {
+                key: 'title',
+                label: 'Estimate',
+                render: (e) => (
+                  <div>
+                    <div className="font-medium text-neutral-100">{e.title}</div>
+                    <div className="text-xs text-neutral-500">created {when(e.created_at)}</div>
                   </div>
-                ) : (
-                  <div className="space-y-2">
-                    {lineItems.map((item, index) => (
-                      <div key={item.id} className="bg-neutral-800 rounded-lg p-4">
-                        <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-                          <div className="md:col-span-2">
-                            <label className="block text-sm font-medium text-neutral-400 mb-1">Description</label>
-                            <input
-                              type="text"
-                              value={item.description}
-                              onChange={(e) => updateLineItem(item.id, 'description', e.target.value)}
-                              className="w-full bg-neutral-700 border border-neutral-600 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                              placeholder="Item description"
-                              required
-                            />
-                          </div>
-                          
-                          <div>
-                            <label className="block text-sm font-medium text-neutral-400 mb-1">Quantity</label>
-                            <input
-                              type="number"
-                              value={item.quantity}
-                              onChange={(e) => updateLineItem(item.id, 'quantity', parseFloat(e.target.value) || 0)}
-                              className="w-full bg-neutral-700 border border-neutral-600 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                              min="0"
-                              step="0.01"
-                              required
-                            />
-                          </div>
-                          
-                          <div>
-                            <label className="block text-sm font-medium text-neutral-400 mb-1">Unit Price</label>
-                            <input
-                              type="number"
-                              value={item.unitPrice}
-                              onChange={(e) => updateLineItem(item.id, 'unitPrice', parseFloat(e.target.value) || 0)}
-                              className="w-full bg-neutral-700 border border-neutral-600 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                              min="0"
-                              step="0.01"
-                              required
-                            />
-                          </div>
-                          
-                          <div className="flex items-end">
-                            <div className="flex items-center justify-between w-full">
-                              <span className="text-white font-medium">
-                                {formatCurrency(item.quantity * item.unitPrice)}
-                              </span>
-                              <button
-                                type="button"
-                                onClick={() => removeLineItem(item.id)}
-                                className="text-red-400 hover:text-red-300"
-                              >
-                                Remove
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
+                )
+              },
+              {
+                key: 'property',
+                label: 'Property',
+                render: (e) => (
+                  <div className="text-xs">
+                    <div className="text-neutral-200">{e.address || '—'}</div>
+                    <div className="text-neutral-500">{[e.city, e.state].filter(Boolean).join(', ') || '—'}</div>
                   </div>
-                )}
-              </div>
+                )
+              },
+              { key: 'status', label: 'Status', render: (e) => <Badge tone={STATUS_TONE[e.status]}>{humanize(e.status)}</Badge> },
+              { key: 'subtotal', label: 'Subtotal', render: (e) => <span className="tabular-nums">{money(e.subtotal)}</span> },
+              { key: 'tax', label: 'Tax', render: (e) => <span className="tabular-nums">{money(e.tax)}</span> },
+              {
+                key: 'total',
+                label: 'Total',
+                render: (e) => <span className="font-semibold tabular-nums text-neutral-100">{money(e.total)}</span>
+              },
+              { key: 'valid_until', label: 'Valid until', render: (e) => <span className="text-xs">{when(e.valid_until)}</span> }
+            ]}
+            rows={rows}
+            keyOf={(e) => e.id}
+          />
+        </AsyncState>
+      </Card>
 
-              {/* Pricing */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-neutral-400 mb-2">Labor Rate ($/hr)</label>
-                  <input
-                    type="number"
-                    value={estimateData.laborRate}
-                    onChange={(e) => setEstimateData({ ...estimateData, laborRate: parseFloat(e.target.value) || 0 })}
-                    className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    min="0"
-                    step="0.01"
-                  />
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-neutral-400 mb-2">Tax Rate (%)</label>
-                  <input
-                    type="number"
-                    value={estimateData.taxRate}
-                    onChange={(e) => setEstimateData({ ...estimateData, taxRate: parseFloat(e.target.value) || 0 })}
-                    className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    min="0"
-                    max="100"
-                    step="0.1"
-                  />
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-neutral-400 mb-2">Discount Rate (%)</label>
-                  <input
-                    type="number"
-                    value={estimateData.discountRate}
-                    onChange={(e) => setEstimateData({ ...estimateData, discountRate: parseFloat(e.target.value) || 0 })}
-                    className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    min="0"
-                    max="100"
-                    step="0.1"
-                  />
-                </div>
-              </div>
-
-              {/* Total Summary */}
-              <div className="bg-neutral-800 rounded-lg p-4">
-                <h4 className="text-lg font-medium text-white mb-3">Estimate Summary</h4>
-                <div className="space-y-2">
-                  <div className="flex justify-between">
-                    <span className="text-neutral-400">Subtotal:</span>
-                    <span className="text-white">{formatCurrency(subtotal)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-neutral-400">Tax ({estimateData.taxRate}%):</span>
-                    <span className="text-white">{formatCurrency(taxAmount)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-neutral-400">Discount ({estimateData.discountRate}%):</span>
-                    <span className="text-white">-{formatCurrency(discountAmount)}</span>
-                  </div>
-                  <div className="flex justify-between text-lg font-bold text-white pt-2 border-t border-neutral-700">
-                    <span>Total:</span>
-                    <span>{formatCurrency(total)}</span>
-                  </div>
-                </div>
-              </div>
-              
-              <div className="flex gap-4 pt-4">
-                <button
-                  type="submit"
-                  className="flex-1 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors"
-                >
-                  Create Estimate
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowCreateModal(false);
-                    resetEstimateForm();
-                  }}
-                  className="flex-1 bg-neutral-700 hover:bg-neutral-600 text-white px-4 py-2 rounded-lg transition-colors"
-                >
-                  Cancel
-                </button>
-              </div>
-            </form>
-          </motion.div>
-        </div>
+      {showCreate && (
+        <CreateEstimate
+          onClose={() => setShowCreate(false)}
+          onCreated={() => { setShowCreate(false); estimates.reload(); }}
+        />
       )}
     </div>
   );
-};
+}
 
-export default EstimateGenerator;
+/** A blank line, with the fields the API's lineItemSchema requires. */
+const blankLine = () => ({
+  key: Math.random().toString(36).slice(2),
+  description: '', category: 'roofing', quantity: '', unit: 'EA', unit_price: ''
+});
+
+function CreateEstimate({ onClose, onCreated }) {
+  const properties = useApi((signal) => api.properties.list({ limit: 100 }, signal), []);
+  const propertyRows = useMemo(() => properties.data?.data ?? [], [properties.data]);
+
+  const [form, setForm] = useState({
+    property_id: '',
+    title: 'Property Restoration Estimate',
+    // Percentages in the UI because that is how a user thinks about them;
+    // converted to the fractions the API validates (tax <= 0.3, the others
+    // <= 0.5) at the point of submit, once.
+    taxPct: '8.25', overheadPct: '10', profitPct: '10',
+    notes: ''
+  });
+  const [lines, setLines] = useState([blankLine()]);
+
+  const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
+
+  const setLine = (key, field) => (e) =>
+    setLines((prev) => prev.map((l) => (l.key === key ? { ...l, [field]: e.target.value } : l)));
+
+  const subtotal = useMemo(
+    () => lines.reduce((sum, l) => sum + (Number(l.quantity) || 0) * (Number(l.unit_price) || 0), 0),
+    [lines]
+  );
+
+  const usable = lines.filter((l) => l.description.trim() && Number(l.quantity) > 0 && l.unit_price !== '');
+
+  const create = useAction(async () => {
+    const result = await api.estimates.create({
+      property_id: form.property_id,
+      title: form.title.trim() || undefined,
+      line_items: usable.map((l) => ({
+        description: l.description.trim(),
+        category: l.category,
+        quantity: Number(l.quantity),
+        unit: l.unit.trim() || 'EA',
+        unit_price: Number(l.unit_price)
+      })),
+      tax_rate: (Number(form.taxPct) || 0) / 100,
+      overhead_rate: (Number(form.overheadPct) || 0) / 100,
+      profit_rate: (Number(form.profitPct) || 0) / 100,
+      ...(form.notes.trim() ? { notes: form.notes.trim() } : {})
+    });
+    toast.success('Estimate created');
+    onCreated();
+    return result;
+  });
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/60 p-4">
+      <div role="dialog" aria-modal="true" aria-labelledby="create-estimate-title"
+        className="my-8 w-full max-w-2xl rounded-xl border border-neutral-800 bg-neutral-900 p-6">
+        <h2 id="create-estimate-title" className="mb-4 text-lg font-semibold text-neutral-100">New estimate</h2>
+
+        <form
+          className="space-y-4"
+          onSubmit={(e) => { e.preventDefault(); if (!create.pending) create.run(); }}
+        >
+          <Field id="est-property" label="Property">
+            {properties.loading ? (
+              <p className="text-sm text-neutral-500">Loading properties…</p>
+            ) : properties.error ? (
+              <Alert tone="error">{messageFor(properties.error)}</Alert>
+            ) : propertyRows.length === 0 ? (
+              <Alert tone="warn">No properties on file yet.</Alert>
+            ) : (
+              <select id="est-property" required className={control} value={form.property_id} onChange={set('property_id')}>
+                <option value="">Select a property…</option>
+                {propertyRows.map((p) => (
+                  <option key={p.id} value={p.id}>{p.address}{p.city ? `, ${p.city}` : ''}</option>
+                ))}
+              </select>
+            )}
+          </Field>
+
+          <Input id="est-title" label="Title" value={form.title} onChange={set('title')} />
+
+          <div>
+            <div className="mb-2 flex items-center justify-between">
+              <span className="text-sm font-medium text-neutral-300">Line items</span>
+              <Button type="button" tone="ghost" onClick={() => setLines((p) => [...p, blankLine()])}>
+                Add line
+              </Button>
+            </div>
+
+            <div className="space-y-3">
+              {lines.map((l) => (
+                <div key={l.key} className="rounded-lg border border-neutral-800 p-3">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-12">
+                    <div className="sm:col-span-12">
+                      <input
+                        aria-label="Description" className={control} placeholder="Description"
+                        value={l.description} onChange={setLine(l.key, 'description')}
+                      />
+                    </div>
+                    <div className="sm:col-span-4">
+                      <select aria-label="Category" className={control} value={l.category} onChange={setLine(l.key, 'category')}>
+                        {CATEGORIES.map((c) => <option key={c} value={c}>{humanize(c)}</option>)}
+                      </select>
+                    </div>
+                    <div className="sm:col-span-3">
+                      <input
+                        aria-label="Quantity" className={control} type="number" min="0" step="any"
+                        placeholder="Qty" value={l.quantity} onChange={setLine(l.key, 'quantity')}
+                      />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <input
+                        aria-label="Unit" className={control} placeholder="EA"
+                        value={l.unit} onChange={setLine(l.key, 'unit')}
+                      />
+                    </div>
+                    <div className="sm:col-span-3">
+                      <input
+                        aria-label="Unit price" className={control} type="number" min="0" step="0.01"
+                        placeholder="Unit price" value={l.unit_price} onChange={setLine(l.key, 'unit_price')}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="mt-2 flex items-center justify-between text-xs text-neutral-500">
+                    <span className="tabular-nums">
+                      {money((Number(l.quantity) || 0) * (Number(l.unit_price) || 0))}
+                    </span>
+                    {lines.length > 1 && (
+                      <button
+                        type="button"
+                        className="text-red-400 hover:text-red-300"
+                        onClick={() => setLines((p) => p.filter((x) => x.key !== l.key))}
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <Input id="est-tax" label="Tax %" type="number" min="0" max="30" step="0.01"
+              value={form.taxPct} onChange={set('taxPct')} />
+            <Input id="est-overhead" label="Overhead %" type="number" min="0" max="50" step="0.01"
+              value={form.overheadPct} onChange={set('overheadPct')} />
+            <Input id="est-profit" label="Profit %" type="number" min="0" max="50" step="0.01"
+              value={form.profitPct} onChange={set('profitPct')} />
+          </div>
+
+          <div className="rounded-lg border border-neutral-800 bg-neutral-950/60 p-3 text-sm">
+            <div className="flex justify-between">
+              <span className="text-neutral-400">Subtotal of {usable.length} line{usable.length === 1 ? '' : 's'}</span>
+              <span className="font-semibold tabular-nums text-neutral-100">{money(subtotal)}</span>
+            </div>
+            <p className="mt-1.5 text-xs text-neutral-500">
+              Overhead, profit and tax are applied by the server when this is saved, in integer cents.
+              The final total comes back from that save rather than being guessed here.
+            </p>
+          </div>
+
+          <TextArea id="est-notes" label="Notes" rows={3} value={form.notes} onChange={set('notes')} />
+
+          {create.error && <Alert tone="error" title="Could not create the estimate">{messageFor(create.error)}</Alert>}
+
+          <div className="flex gap-3 pt-2">
+            <Button type="submit" className="flex-1" busy={create.pending}
+              disabled={!form.property_id || usable.length === 0}>
+              Create estimate
+            </Button>
+            <Button type="button" tone="ghost" className="flex-1" onClick={onClose}>Cancel</Button>
+          </div>
+          {usable.length === 0 && (
+            <p className="text-xs text-neutral-500">
+              At least one line needs a description, a quantity above zero and a unit price.
+            </p>
+          )}
+        </form>
+      </div>
+    </div>
+  );
+}

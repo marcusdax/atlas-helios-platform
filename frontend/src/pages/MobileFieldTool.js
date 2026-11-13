@@ -1,506 +1,281 @@
-import React, { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
+import { api, messageFor } from '../lib/api';
+import { useApi, useAction } from '../lib/useApi';
+import {
+  PageHeader, Card, Button, Select, TextArea, Field, control, Alert, Badge
+} from '../components/ui/kit';
 
-const MobileFieldTool = () => {
+/**
+ * The field capture tool.
+ *
+ * This page made three claims that were not true, and the first one could cost
+ * someone their work.
+ *
+ * 1. **"All data synced successfully."** `handleSync` waited two seconds on a
+ *    `setTimeout`, set `synced: true` on every photo and showed that message.
+ *    Nothing was uploaded. A technician standing in a hailed-out street, told
+ *    their photos were safe on the server, has every reason to clear their
+ *    phone — and the evidence for a claim would be gone. There is no
+ *    incremental sync endpoint to call, so the button is not reimplemented: it
+ *    is replaced by a submit that really uploads, and a status that only says
+ *    "uploaded" after the API has said so.
+ * 2. **"Voice note recorded."** The handler asked for microphone permission,
+ *    stopped the stream immediately, waited three seconds and appended
+ *    "[Voice note recorded]" to the notes. No audio was ever captured, and the
+ *    assessment then carried a note asserting a recording existed. Removed
+ *    rather than stubbed; there is no endpoint that accepts audio.
+ * 3. **A saved assessment.** `handleSaveAssessment` ended at `console.log`.
+ *
+ * What the API actually offers is one multipart call: a property, an inspection
+ * type, notes and up to twelve images, answered 202 because the damage analysis
+ * runs out of band. The form is shaped to that.
+ *
+ * Known limitation, stated on the page rather than papered over: captures live
+ * in this tab until submitted. There is no durable offline queue — building one
+ * means IndexedDB and a retry policy, which is a feature, not a detail — so the
+ * page says so instead of implying otherwise.
+ */
+
+const INSPECTION_TYPES = ['exterior', 'roof', 'full', 'storm_damage'];
+
+/** Mirrors the API's multer fileFilter, so a doomed upload is caught here. */
+const ACCEPTED = ['image/jpeg', 'image/png', 'image/webp', 'image/heic'];
+const MAX_FILES = 12;
+const MAX_BYTES = 15 * 1024 * 1024;
+
+const humanize = (s) => String(s || '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+
+export default function MobileFieldTool() {
   const [photos, setPhotos] = useState([]);
-  const [assessmentNotes, setAssessmentNotes] = useState('');
-  const [propertyInfo, setPropertyInfo] = useState({
-    address: '',
-    propertyId: '',
-    assessmentType: 'damage',
-    severity: 'medium'
-  });
-  const [location, setLocation] = useState({ lat: null, lng: null });
-  const [isOnline, setIsOnline] = useState(navigator.onLine);
-  const [syncStatus, setSyncStatus] = useState('synced');
-  const [recording, setRecording] = useState(false);
+  const [notes, setNotes] = useState('');
+  const [propertyId, setPropertyId] = useState('');
+  const [inspectionType, setInspectionType] = useState('storm_damage');
+  const [location, setLocation] = useState(null);
+  const [locationError, setLocationError] = useState(null);
+  const [online, setOnline] = useState(() => (typeof navigator === 'undefined' ? true : navigator.onLine));
+  const [submitted, setSubmitted] = useState(null);
+
+  const fileInput = useRef(null);
+  const photosRef = useRef(photos);
+  photosRef.current = photos;
+
+  const properties = useApi((signal) => api.properties.list({ limit: 100 }, signal), []);
+  const propertyRows = useMemo(() => properties.data?.data ?? [], [properties.data]);
 
   useEffect(() => {
-    // Get user location
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          setLocation({
-            lat: position.coords.latitude,
-            lng: position.coords.longitude
-          });
-        },
-        (error) => {
-          console.error('Error getting location:', error);
-          toast.error('Unable to get location');
-        }
-      );
-    }
-
-    // Monitor online status
-    const handleOnline = () => setIsOnline(true);
-    const handleOffline = () => setIsOnline(false);
-
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-    };
+    const up = () => setOnline(true);
+    const down = () => setOnline(false);
+    window.addEventListener('online', up);
+    window.addEventListener('offline', down);
+    return () => { window.removeEventListener('online', up); window.removeEventListener('offline', down); };
   }, []);
 
-  const handlePhotoCapture = (e) => {
-    const files = Array.from(e.target.files);
-    const newPhotos = files.map((file, index) => ({
-      id: Date.now() + index,
-      file,
-      url: URL.createObjectURL(file),
-      timestamp: new Date(),
-      location: location,
-      synced: false,
-      description: '',
-      damageType: 'other'
-    }));
-    setPhotos([...photos, ...newPhotos]);
-    setSyncStatus('pending');
-    toast.success(`${files.length} photo(s) captured`);
+  useEffect(() => {
+    if (!navigator.geolocation) { setLocationError('This device reports no location support.'); return; }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => setLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy }),
+      // Location is useful context, not a requirement, so a refusal is reported
+      // quietly and the capture still works.
+      (err) => setLocationError(err.message || 'Location unavailable.')
+    );
+  }, []);
+
+  // Object URLs are revoked on unmount; the old page created one per photo and
+  // never released any, so a long shift leaked every image it had previewed.
+  useEffect(() => () => {
+    photosRef.current.forEach((p) => URL.revokeObjectURL(p.url));
+  }, []);
+
+  const addPhotos = (event) => {
+    const picked = Array.from(event.target.files || []);
+    if (!picked.length) return;
+
+    const room = MAX_FILES - photos.length;
+    const rejected = [];
+    const accepted = [];
+
+    picked.forEach((file) => {
+      if (!ACCEPTED.includes(file.type)) { rejected.push(`${file.name}: ${file.type || 'unknown type'} is not accepted`); return; }
+      if (file.size > MAX_BYTES) { rejected.push(`${file.name}: over 15 MB`); return; }
+      if (accepted.length >= room) { rejected.push(`${file.name}: over the ${MAX_FILES}-photo limit`); return; }
+      accepted.push({ key: `${file.name}-${file.lastModified}-${file.size}`, file, url: URL.createObjectURL(file) });
+    });
+
+    if (accepted.length) setPhotos((prev) => [...prev, ...accepted]);
+    // Rejections are named individually: "some photos could not be added" sends
+    // someone back to the property to re-shoot the wrong ones.
+    rejected.forEach((r) => toast.error(r));
+    if (fileInput.current) fileInput.current.value = '';
   };
 
-  const handleVoiceNote = async () => {
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      toast.error('Voice recording not supported');
-      return;
-    }
+  const removePhoto = (key) => setPhotos((prev) => {
+    const found = prev.find((p) => p.key === key);
+    if (found) URL.revokeObjectURL(found.url);
+    return prev.filter((p) => p.key !== key);
+  });
 
-    try {
-      setRecording(!recording);
-      if (!recording) {
-        // Start recording
-        // The permission prompt is the point of this call; the stream itself is
-        // not used yet because the recorder is still a stub. Released straight
-        // away so the microphone indicator does not stay on.
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        stream.getTracks().forEach((track) => track.stop());
-        // Mock recording - in real implementation, would use MediaRecorder API
-        setTimeout(() => {
-          setRecording(false);
-          toast.success('Voice note recorded');
-          setAssessmentNotes(prev => prev + '\n[Voice note recorded]');
-        }, 3000);
-      }
-    } catch (error) {
-      toast.error('Failed to access microphone');
-      setRecording(false);
-    }
-  };
+  const submit = useAction(async () => {
+    const body = new FormData();
+    body.append('property_id', propertyId);
+    body.append('inspection_type', inspectionType);
 
-  const handleSync = async () => {
-    if (!isOnline) {
-      toast.error('No internet connection');
-      return;
-    }
+    // Location rides along in the notes because the API has no coordinate
+    // field on an assessment; putting it somewhere it is not stored would be
+    // the same class of lie this page is being rid of.
+    const trimmed = notes.trim();
+    const stamp = location
+      ? `GPS at capture: ${location.lat.toFixed(5)}, ${location.lng.toFixed(5)} (±${Math.round(location.accuracy)}m)`
+      : null;
+    const composed = [trimmed, stamp].filter(Boolean).join('\n\n');
+    if (composed) body.append('notes', composed.slice(0, 2000));
 
-    setSyncStatus('syncing');
-    try {
-      // Mock sync process
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      setPhotos(photos.map(photo => ({ ...photo, synced: true })));
-      setSyncStatus('synced');
-      toast.success('All data synced successfully');
-    } catch (error) {
-      setSyncStatus('error');
-      toast.error('Sync failed');
-    }
-  };
+    photos.forEach((p) => body.append('images', p.file, p.file.name));
 
-  const handleSaveAssessment = async () => {
-    if (!propertyInfo.address) {
-      toast.error('Please enter property address');
-      return;
-    }
+    const result = await api.assessments.start(body);
+    const queued = result?.meta?.images_queued ?? 0;
 
-    if (photos.length === 0) {
-      toast.error('Please capture at least one photo');
-      return;
-    }
+    setSubmitted({ id: result?.data?.id, queued });
+    toast.success(queued ? `Assessment submitted, ${queued} photo${queued === 1 ? '' : 's'} uploaded` : 'Assessment submitted');
 
-    try {
-      // Mock save process
-      const assessment = {
-        ...propertyInfo,
-        photos,
-        notes: assessmentNotes,
-        location,
-        createdAt: new Date().toISOString()
-      };
+    photos.forEach((p) => URL.revokeObjectURL(p.url));
+    setPhotos([]);
+    setNotes('');
+    return result;
+  });
 
-      // In real implementation, would save to local storage and sync
-      console.log('Saving assessment:', assessment);
-      
-      toast.success('Assessment saved successfully');
-      
-      // Reset form
-      setPhotos([]);
-      setAssessmentNotes('');
-      setPropertyInfo({
-        address: '',
-        propertyId: '',
-        assessmentType: 'damage',
-        severity: 'medium'
-      });
-    } catch (error) {
-      toast.error('Failed to save assessment');
-    }
-  };
-
-  const updatePhotoDescription = (photoId, description) => {
-    setPhotos(photos.map(photo => 
-      photo.id === photoId ? { ...photo, description } : photo
-    ));
-  };
-
-  const updatePhotoDamageType = (photoId, damageType) => {
-    setPhotos(photos.map(photo => 
-      photo.id === photoId ? { ...photo, damageType } : photo
-    ));
-  };
-
-  const removePhoto = (photoId) => {
-    setPhotos(photos.filter(photo => photo.id !== photoId));
-    toast.success('Photo removed');
-  };
-
-  const getSyncStatusColor = () => {
-    switch (syncStatus) {
-      case 'synced': return 'text-green-400';
-      case 'syncing': return 'text-yellow-400';
-      case 'pending': return 'text-orange-400';
-      case 'error': return 'text-red-400';
-      default: return 'text-gray-400';
-    }
-  };
-
-  const getSyncStatusIcon = () => {
-    switch (syncStatus) {
-      case 'synced': return '✓';
-      case 'syncing': return '⟳';
-      case 'pending': return '⏰';
-      case 'error': return '✗';
-      default: return '?';
-    }
-  };
+  const canSubmit = Boolean(propertyId) && online && !submit.pending;
 
   return (
-    <div className="space-y-4">
-      {/* Header */}
-      <motion.div
-        initial={{ opacity: 0, y: -20 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="bg-neutral-900 rounded-lg border border-neutral-800 p-4"
-      >
-        <div className="flex justify-between items-center mb-4">
-          <div>
-            <h1 className="text-2xl font-bold text-white">Field Assessment Tool</h1>
-            <p className="text-neutral-400 text-sm">Mobile property inspection and assessment</p>
-          </div>
-          
-          <div className="flex items-center gap-4">
-            {/* Connection Status */}
-            <div className="flex items-center gap-2">
-              <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-green-400' : 'bg-red-400'}`}></div>
-              <span className="text-sm text-neutral-400">
-                {isOnline ? 'Online' : 'Offline'}
-              </span>
-            </div>
-            
-            {/* Sync Status */}
-            <div className="flex items-center gap-2">
-              <span className={`text-sm ${getSyncStatusColor()}`}>
-                {getSyncStatusIcon()}
-              </span>
-              <span className={`text-sm ${getSyncStatusColor()}`}>
-                {syncStatus.charAt(0).toUpperCase() + syncStatus.slice(1)}
-              </span>
-            </div>
-            
-            {/* Sync Button */}
-            <button
-              onClick={handleSync}
-              disabled={syncStatus === 'syncing' || !isOnline}
-              className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white px-3 py-1 rounded-lg text-sm transition-colors"
-            >
-              Sync Data
-            </button>
-          </div>
+    <div className="space-y-6">
+      <PageHeader
+        title="Field Capture"
+        subtitle="Record an on-site assessment and upload its photos in one submission."
+        actions={
+          <Badge tone={online ? 'good' : 'bad'}>{online ? 'Online' : 'Offline'}</Badge>
+        }
+      />
+
+      {!online && (
+        <Alert tone="warn" title="This device is offline">
+          Captures are held in this tab and cannot be submitted until the connection returns.
+          Keep the tab open: nothing here is stored on the device.
+        </Alert>
+      )}
+
+      {submitted && (
+        <Alert tone="success" title="Assessment submitted">
+          {submitted.queued > 0
+            ? `${submitted.queued} photo${submitted.queued === 1 ? '' : 's'} uploaded. Damage analysis runs on the server and the result appears under assessment history.`
+            : 'No photos were attached. Damage analysis runs on the server once photos are added.'}
+        </Alert>
+      )}
+
+      <Card title="Property">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <Field id="fc-property" label="Property" hint="An assessment is recorded against a property already on file.">
+            {properties.loading ? (
+              <p className="text-sm text-neutral-500">Loading properties…</p>
+            ) : properties.error ? (
+              <Alert tone="error">{messageFor(properties.error)}</Alert>
+            ) : propertyRows.length === 0 ? (
+              <Alert tone="warn">No properties on file yet.</Alert>
+            ) : (
+              <select id="fc-property" className={control} value={propertyId} onChange={(e) => setPropertyId(e.target.value)}>
+                <option value="">Select a property…</option>
+                {propertyRows.map((p) => (
+                  <option key={p.id} value={p.id}>{p.address}{p.city ? `, ${p.city}` : ''}</option>
+                ))}
+              </select>
+            )}
+          </Field>
+
+          <Select
+            id="fc-type" label="Inspection type" value={inspectionType}
+            onChange={(e) => setInspectionType(e.target.value)}
+            options={INSPECTION_TYPES.map((t) => ({ value: t, label: humanize(t) }))}
+          />
         </div>
 
-        {/* Location Info */}
-        {location && (
-          <div className="text-sm text-neutral-400">
-            📍 Location: {location.lat.toFixed(6)}, {location.lng.toFixed(6)}
-          </div>
-        )}
-      </motion.div>
+        <p className="mt-3 text-xs text-neutral-500">
+          {location
+            ? `Location captured: ${location.lat.toFixed(5)}, ${location.lng.toFixed(5)} (±${Math.round(location.accuracy)}m). It is recorded in the notes.`
+            : locationError
+              ? `No location: ${locationError}`
+              : 'Requesting location…'}
+        </p>
+      </Card>
 
-      {/* Main Content */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* Left Panel - Property Info & Controls */}
-        <motion.div
-          initial={{ opacity: 0, x: -20 }}
-          animate={{ opacity: 1, x: 0 }}
-          transition={{ delay: 0.1 }}
-          className="space-y-4"
-        >
-          {/* Property Information */}
-          <div className="bg-neutral-900 rounded-lg border border-neutral-800 p-4">
-            <h3 className="text-lg font-semibold text-white mb-4">Property Information</h3>
-            
-            <div className="space-y-3">
-              <div>
-                <label className="block text-sm font-medium text-neutral-400 mb-1">Address</label>
-                <input
-                  type="text"
-                  value={propertyInfo.address}
-                  onChange={(e) => setPropertyInfo({ ...propertyInfo, address: e.target.value })}
-                  className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="Enter property address"
-                />
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-neutral-400 mb-1">Property ID</label>
-                <input
-                  type="text"
-                  value={propertyInfo.propertyId}
-                  onChange={(e) => setPropertyInfo({ ...propertyInfo, propertyId: e.target.value })}
-                  className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="Property identifier"
-                />
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-neutral-400 mb-1">Assessment Type</label>
-                <select
-                  value={propertyInfo.assessmentType}
-                  onChange={(e) => setPropertyInfo({ ...propertyInfo, assessmentType: e.target.value })}
-                  className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="damage">Damage Assessment</option>
-                  <option value="preventive">Preventive Inspection</option>
-                  <option value="routine">Routine Check</option>
-                  <option value="insurance">Insurance Claim</option>
-                </select>
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-neutral-400 mb-1">Severity</label>
-                <select
-                  value={propertyInfo.severity}
-                  onChange={(e) => setPropertyInfo({ ...propertyInfo, severity: e.target.value })}
-                  className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="low">Low</option>
-                  <option value="medium">Medium</option>
-                  <option value="high">High</option>
-                  <option value="critical">Critical</option>
-                </select>
-              </div>
-            </div>
-          </div>
+      <Card
+        title={`Photos (${photos.length}/${MAX_FILES})`}
+        actions={
+          <Button
+            tone="ghost" type="button"
+            onClick={() => fileInput.current?.click()}
+            disabled={photos.length >= MAX_FILES}
+          >
+            Add photos
+          </Button>
+        }
+      >
+        <input
+          ref={fileInput} type="file" accept={ACCEPTED.join(',')} multiple capture="environment"
+          onChange={addPhotos} className="hidden"
+        />
 
-          {/* Quick Actions */}
-          <div className="bg-neutral-900 rounded-lg border border-neutral-800 p-4">
-            <h3 className="text-lg font-semibold text-white mb-4">Quick Actions</h3>
-            
-            <div className="space-y-3">
-              {/* Camera Capture */}
-              <div className="relative">
-                <input
-                  type="file"
-                  accept="image/*"
-                  multiple
-                  capture="environment"
-                  onChange={handlePhotoCapture}
-                  className="hidden"
-                  id="camera-input"
-                />
-                <label
-                  htmlFor="camera-input"
-                  className="block w-full bg-green-600 hover:bg-green-700 text-white px-4 py-3 rounded-lg text-center cursor-pointer transition-colors"
-                >
-                  📷 Capture Photos
-                </label>
-              </div>
-              
-              {/* Voice Note */}
-              <button
-                onClick={handleVoiceNote}
-                className={`w-full px-4 py-3 rounded-lg text-white transition-colors ${
-                  recording 
-                    ? 'bg-red-600 hover:bg-red-700' 
-                    : 'bg-blue-600 hover:bg-blue-700'
-                }`}
-              >
-                {recording ? '⏹️ Stop Recording' : '🎤 Voice Note'}
-              </button>
-              
-              {/* Save Assessment */}
-              <button
-                onClick={handleSaveAssessment}
-                className="w-full bg-purple-600 hover:bg-purple-700 text-white px-4 py-3 rounded-lg transition-colors"
-              >
-                💾 Save Assessment
-              </button>
-            </div>
-          </div>
-        </motion.div>
-
-        {/* Right Panel - Photos & Notes */}
-        <motion.div
-          initial={{ opacity: 0, x: 20 }}
-          animate={{ opacity: 1, x: 0 }}
-          transition={{ delay: 0.2 }}
-          className="lg:col-span-2 space-y-4"
-        >
-          {/* Photo Gallery */}
-          <div className="bg-neutral-900 rounded-lg border border-neutral-800 p-4">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-lg font-semibold text-white">
-                Photos ({photos.length})
-              </h3>
-              <div className="text-sm text-neutral-400">
-                {photos.filter(p => !p.synced).length} pending sync
-              </div>
-            </div>
-            
-            {photos.length === 0 ? (
-              <div className="text-center py-12 bg-neutral-800 rounded-lg">
-                <div className="text-4xl mb-4">📸</div>
-                <p className="text-neutral-400">No photos captured yet</p>
-                <p className="text-sm text-neutral-500 mt-2">
-                  Use the camera button to capture property photos
-                </p>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-96 overflow-y-auto">
-                {photos.map((photo) => (
-                  <div key={photo.id} className="bg-neutral-800 rounded-lg overflow-hidden">
-                    <div className="relative">
-                      <img
-                        src={photo.url}
-                        alt={`Inspection capture ${photo.id}`}
-                        className="w-full h-32 object-cover"
-                      />
-                      <div className="absolute top-2 right-2">
-                        <span className={`px-2 py-1 text-xs rounded-full ${
-                          photo.synced 
-                            ? 'bg-green-900/50 text-green-400' 
-                            : 'bg-orange-900/50 text-orange-400'
-                        }`}>
-                          {photo.synced ? 'Synced' : 'Pending'}
-                        </span>
-                      </div>
-                    </div>
-                    
-                    <div className="p-3">
-                      <select
-                        value={photo.damageType}
-                        onChange={(e) => updatePhotoDamageType(photo.id, e.target.value)}
-                        className="w-full bg-neutral-700 border border-neutral-600 rounded-lg px-2 py-1 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 mb-2"
-                      >
-                        <option value="other">General</option>
-                        <option value="roof">Roof Damage</option>
-                        <option value="window">Window Damage</option>
-                        <option value="siding">Siding Damage</option>
-                        <option value="foundation">Foundation</option>
-                        <option value="water">Water Damage</option>
-                        <option value="debris">Debris</option>
-                      </select>
-                      
-                      <textarea
-                        value={photo.description}
-                        onChange={(e) => updatePhotoDescription(photo.id, e.target.value)}
-                        className="w-full bg-neutral-700 border border-neutral-600 rounded-lg px-2 py-1 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 mb-2"
-                        rows={2}
-                        placeholder="Add description..."
-                      />
-                      
-                      <button
-                        onClick={() => removePhoto(photo.id)}
-                        className="w-full bg-red-600 hover:bg-red-700 text-white px-2 py-1 rounded text-sm transition-colors"
-                      >
-                        Remove
-                      </button>
-                    </div>
+        {photos.length === 0 ? (
+          <p className="py-6 text-sm text-neutral-500">
+            No photos yet. JPEG, PNG, WebP or HEIC, up to 15 MB each.
+          </p>
+        ) : (
+          <>
+            <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+              {photos.map((p) => (
+                <li key={p.key} className="overflow-hidden rounded-lg border border-neutral-800">
+                  <img src={p.url} alt={p.file.name} className="h-28 w-full object-cover" />
+                  <div className="flex items-center justify-between gap-2 p-2">
+                    <span className="truncate text-xs text-neutral-400" title={p.file.name}>
+                      {(p.file.size / 1024 / 1024).toFixed(1)} MB
+                    </span>
+                    <button
+                      type="button" onClick={() => removePhoto(p.key)}
+                      className="text-xs text-red-400 hover:text-red-300"
+                    >
+                      Remove
+                    </button>
                   </div>
-                ))}
-              </div>
-            )}
-          </div>
+                </li>
+              ))}
+            </ul>
+            <p className="mt-3 text-xs text-neutral-500">
+              Held in this tab only. They reach the server when you submit below — there is no
+              background upload, and closing the tab loses them.
+            </p>
+          </>
+        )}
+      </Card>
 
-          {/* Assessment Notes */}
-          <div className="bg-neutral-900 rounded-lg border border-neutral-800 p-4">
-            <h3 className="text-lg font-semibold text-white mb-4">Assessment Notes</h3>
-            
-            <textarea
-              value={assessmentNotes}
-              onChange={(e) => setAssessmentNotes(e.target.value)}
-              className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-              rows={6}
-              placeholder="Enter detailed assessment notes...
-              
-• Describe overall property condition
-• Note specific areas of concern
-• Document weather conditions
-• Add any safety observations
-• Include measurements if needed"
-            />
-          </div>
+      <Card title="Notes">
+        <TextArea
+          id="fc-notes" rows={5} value={notes} maxLength={1800}
+          placeholder="What you can see: damage, access, anything the office needs to know."
+          onChange={(e) => setNotes(e.target.value)}
+          label="" hint={`${notes.length}/1800 characters`}
+        />
+      </Card>
 
-          {/* Quick Templates */}
-          <div className="bg-neutral-900 rounded-lg border border-neutral-800 p-4">
-            <h3 className="text-lg font-semibold text-white mb-4">Quick Templates</h3>
-            
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                onClick={() => setAssessmentNotes(prev => prev + '\n• Roof inspected for storm damage')}
-                className="bg-neutral-800 hover:bg-neutral-700 text-white px-3 py-2 rounded text-sm transition-colors"
-              >
-                Roof Inspection
-              </button>
-              <button
-                onClick={() => setAssessmentNotes(prev => prev + '\n• Windows checked for cracks/breakage')}
-                className="bg-neutral-800 hover:bg-neutral-700 text-white px-3 py-2 rounded text-sm transition-colors"
-              >
-                Window Check
-              </button>
-              <button
-                onClick={() => setAssessmentNotes(prev => prev + '\n• Siding examined for damage')}
-                className="bg-neutral-800 hover:bg-neutral-700 text-white px-3 py-2 rounded text-sm transition-colors"
-              >
-                Siding Review
-              </button>
-              <button
-                onClick={() => setAssessmentNotes(prev => prev + '\n• Foundation assessed for cracks')}
-                className="bg-neutral-800 hover:bg-neutral-700 text-white px-3 py-2 rounded text-sm transition-colors"
-              >
-                Foundation
-              </button>
-              <button
-                onClick={() => setAssessmentNotes(prev => prev + '\n• Debris documented and measured')}
-                className="bg-neutral-800 hover:bg-neutral-700 text-white px-3 py-2 rounded text-sm transition-colors"
-              >
-                Debris Report
-              </button>
-              <button
-                onClick={() => setAssessmentNotes(prev => prev + '\n• Water damage assessment completed')}
-                className="bg-neutral-800 hover:bg-neutral-700 text-white px-3 py-2 rounded text-sm transition-colors"
-              >
-                Water Damage
-              </button>
-            </div>
-          </div>
-        </motion.div>
+      {submit.error && (
+        <Alert tone="error" title="Submission failed — nothing was uploaded">
+          {messageFor(submit.error)} Your photos and notes are still here; try again.
+        </Alert>
+      )}
+
+      <div className="flex flex-wrap gap-3">
+        <Button onClick={() => submit.run()} busy={submit.pending} disabled={!canSubmit}>
+          {submit.pending ? 'Uploading…' : `Submit assessment${photos.length ? ` with ${photos.length} photo${photos.length === 1 ? '' : 's'}` : ''}`}
+        </Button>
+        {!propertyId && <p className="self-center text-xs text-neutral-500">Select a property to submit.</p>}
       </div>
     </div>
   );
-};
-
-export default MobileFieldTool;
+}
