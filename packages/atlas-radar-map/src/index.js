@@ -1,6 +1,7 @@
 'use strict';
 
 const sources = require('./sources');
+const basemaps = require('./basemaps');
 const { RadarTimeline, framesFromRainViewer, clamp } = require('./timeline');
 const { RadarLanes, syncLane, sourceKey } = require('./lanes');
 const alerts = require('./alerts');
@@ -9,6 +10,9 @@ const properties = require('./properties');
 module.exports = {
   // Data sources
   ...sources,
+
+  // Basemaps: hosted OpenFreeMap, self-hosted Protomaps/PMTiles, USGS imagery
+  ...basemaps,
 
   // Timeline
   RadarTimeline,

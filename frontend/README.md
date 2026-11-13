@@ -58,6 +58,15 @@ labelled *"Demo forecast — the NOAA feed is not connected."*
 | `REACT_APP_API_URL` | `/api` | Same-origin by default, which is what the reverse proxy expects. |
 | `REACT_APP_WS_URL` | the page's own origin | Only set this for a split deployment where the socket lives elsewhere. |
 | `REACT_APP_DEFAULT_LAT` / `_LNG` | — | Fallback forecast point. Normally unnecessary: the dashboard forecasts the first active monitoring region. |
+| `REACT_APP_BASEMAP_PROVIDER` | `hosted` | `hosted` uses OpenFreeMap's public instance — no key, no rate limit, commercial use allowed. `pmtiles` uses a self-hosted Protomaps archive instead. |
+| `REACT_APP_PMTILES_URL` | — | The `.pmtiles` archive, e.g. `https://tiles.example.com/dfw.pmtiles`. Required by the `pmtiles` provider; without it the map falls back to hosted and says so in its footer. |
+| `REACT_APP_PMTILES_STYLE_URL` | built-in | Only for an archive built with the Protomaps schema rather than OpenMapTiles. The built-in style keeps a self-hosted archive working offline. |
+
+Both tile hosts serve OpenStreetMap data through the OpenMapTiles schema and
+render through MapLibre GL, so switching provider changes who serves the tiles
+and nothing else. `DESIGN/mapping-stack.md` covers the choice, why
+`tile.openstreetmap.org` is refused in code, and why GLG-CE was evaluated and
+rejected on licence grounds.
 
 The backend has one worth knowing about too: **`WEATHER_ALLOW_MOCK=true`** lets
 a failed NOAA call answer with the demo generator instead of a 503. It is off by
