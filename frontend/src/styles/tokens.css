@@ -1,0 +1,115 @@
+/**
+ * AUCTUM engine palette + Atlas market accent layer.
+ *
+ * Source: the Ecosystem Blueprint (Phase 1, 2026-11-12), 01 — Brand
+ * architecture §5–6, and the Unified Brand Matrix v1.0 §2.
+ *
+ * Two rules from §5 shape this file, and they are easy to get backwards:
+ *
+ *   The ENGINE PALETTE is the invariant ground and is always present.
+ *   The MARKET ACCENT tells a viewer which company they are looking at. Its
+ *   scope is brand chrome, public trust pages, yard signs, OG images and email
+ *   headers — and, in the blueprint's words, "market accents never appear
+ *   inside a tool's controls".
+ *
+ * So Atlas amber is NOT the colour of this product's buttons. In-tool emphasis
+ * comes from the engine palette (brass for action and provenance, proof for met
+ * evidence, alert for risk). That is why --brand and --accent below are kept
+ * apart: one is who we are, the other is what you can press.
+ *
+ * Contrast figures are measured, not asserted. Every value below was checked
+ * against --ink-950 with the WCAG 2.x relative-luminance formula:
+ *
+ *   ivory      17.30:1      brass       8.09:1      slate-300   7.69:1
+ *   atlas       6.85:1      alert       4.91:1      proof       4.66:1
+ *
+ * All six clear 4.5:1, so any of them is usable for body text on the canvas.
+ * The ink and slate-600 steps are surfaces, not text colours, and are not
+ * expected to pass.
+ */
+
+:root {
+  color-scheme: dark;
+
+  /* ---------------------------------------------------- engine palette -- */
+  /* Immutable. Shared by every AUCTUM market and every surface. */
+  --ink-950: #0A0D11;   /* app canvas / page ground */
+  --ink-900: #11161C;   /* panel / card surface */
+  --ink-800: #182028;   /* raised surface */
+  --ink-700: #222A33;   /* borders, dividers */
+  --slate-600: #34404D; /* strong borders */
+  --slate-300: #9AA4AE; /* muted text */
+  --ivory: #F6F1E7;     /* paper / light canvas */
+  --brass: #C9A15A;     /* seal, provenance, premium, in-tool action */
+  --proof: #2E8B6B;     /* met evidence: a badge whose records were accepted */
+  --alert: #D9534F;     /* risk, failures, danger */
+
+  /* ------------------------------------------------ market accent layer -- */
+  /*
+   * Atlas — roofing and storm restoration. Settled in the brand matrix and
+   * measured here at 6.85:1 on the canvas.
+   *
+   * Helios has no accent token on purpose. The proposed #C4873A is marked
+   * (TO CONFIRM) in the matrix and "Keep, unresolved" in the blueprint's truth
+   * constraint 7, which requires ΔE2000 >= 15 from Atlas. Measured, that pair
+   * is ΔE2000 = 2.94 — for scale, Atlas against brass is 9.51. The two ambers
+   * are one colour to a viewer, so shipping it would make the brand's own
+   * distinctness rule false on its first use. See scripts/brand-colour-check.
+   */
+  --atlas: #D08A3E;
+
+  /** Who this surface belongs to. Brand chrome only — never a control. */
+  --brand: var(--atlas);
+
+  /** What you can press. Engine palette, so it is market-independent. */
+  --accent: var(--brass);
+
+  /* ------------------------------------------------------- data states -- */
+  /*
+   * The dashboard lifecycle. Colour is never the only signal (visual language
+   * principle 4), so each state also carries its own dot geometry and its
+   * literal name; these are the hue half of that pairing.
+   */
+  --state-live: var(--proof);
+  --state-syncing: var(--ivory);
+  --state-stale: var(--slate-300);
+  --state-degraded: var(--brass);
+  --state-offline: var(--alert);
+
+  /* --------------------------------------------------------- typography -- */
+  --font-display: 'Space Grotesk', 'Helvetica Neue', Arial, sans-serif;
+  --font-ui: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* Fluid scale, mobile-first. */
+  --step-0: clamp(1rem, 0.95rem + 0.25vw, 1.125rem);
+  --step-1: clamp(1.125rem, 1.05rem + 0.4vw, 1.375rem);
+  --step-2: clamp(1.375rem, 1.25rem + 0.6vw, 1.75rem);
+  --step-3: clamp(1.75rem, 1.5rem + 1vw, 2.25rem);
+  --step-4: clamp(2.25rem, 1.9rem + 1.6vw, 3rem);
+  --step-5: clamp(2.75rem, 2.2rem + 2.4vw, 3.75rem);
+
+  /* ------------------------------------------------------------ motion -- */
+  --ease-brand: cubic-bezier(0.22, 1, 0.36, 1); /* spring-out: firm, then free */
+  --dur-fast: 120ms;
+  --dur-base: 200ms;
+  --dur-slow: 320ms;
+}
+
+/* The motion spec forbids parallax, auto-play video and flashing, and requires
+   reduced motion to be honoured everywhere rather than per component. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-fast: 0ms;
+    --dur-base: 0ms;
+    --dur-slow: 0ms;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}

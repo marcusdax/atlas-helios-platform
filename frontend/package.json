@@ -40,7 +40,9 @@
     "build:sw": "workbox generateSW",
     "build:check": "node scripts/check-build-warnings.mjs",
     "storybook": "storybook dev -p 6006",
-    "build-storybook": "storybook build"
+    "build-storybook": "storybook build",
+    "brand:check": "node scripts/brand-check.mjs",
+    "brand:colour": "node scripts/brand-colour-check.cjs"
   },
   "eslintConfig": {
     "extends": [

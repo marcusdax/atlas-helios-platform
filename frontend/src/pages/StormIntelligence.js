@@ -1,9 +1,19 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { useStorm } from '../contexts/StormContext';
+import { Alert } from '../components/ui/kit';
+import { api, messageFor } from '../lib/api';
+import { useApi } from '../lib/useApi';
 
 const StormIntelligence = () => {
-  const { storms, loading, fetchStorms, subscribeToAlerts } = useStorm();
+  // Same omission as the property page: the context tracked `error` and this
+  // page did not read it, so an unreachable API rendered "No storms found" —
+  // an all-clear, to the people who dispatch crews into storms.
+  // The context's key is `activeStorms`. This page destructured `storms`, got
+  // undefined, and threw on `storms.length` during its first render — so the
+  // whole page was a blank screen, not a degraded one. Aliased rather than
+  // renamed throughout, to keep this fix separate from the rest of the page.
+  const { activeStorms, loading, error, fetchStorms } = useStorm();
   const [selectedStorm, setSelectedStorm] = useState(null);
   const [filters, setFilters] = useState({
     severity: 'all',
@@ -11,14 +21,37 @@ const StormIntelligence = () => {
     activeOnly: true
   });
 
+  // The monitoring regions Atlas actually polls. The old filter offered
+  // "Atlantic", "Pacific", "Gulf of Mexico" and "Caribbean" — hurricane basins,
+  // for a product that tracks hail and wind over named metro counties.
+  const regions = useApi((signal) => api.storms.regions(signal), []);
+  const regionNames = useMemo(
+    () => [...new Set((regions.data?.data ?? []).map((r) => r.name).filter(Boolean))].sort(),
+    [regions.data]
+  );
+
   useEffect(() => {
-    fetchStorms(filters);
-    subscribeToAlerts();
-    // The context's functions are recreated on every provider render, so
-    // listing them here would refetch in a loop. The filters are what should
-    // trigger a refetch.
+    // Only the parameters the route validates. It accepts status, severity,
+    // type, since and a lat/lng/radius box — not `region`, and not
+    // `activeOnly`, so the old call returned 400 on every load. The page never
+    // showed that, because it crashed before the response arrived.
+    fetchStorms({
+      status: filters.activeOnly ? 'active' : undefined,
+      ...(filters.severity === 'all' ? {} : { severity: filters.severity })
+    }).catch(() => { /* surfaced through the context's `error` */ });
+
+    // `subscribeToAlerts()` ran here and called GET /api/storms/alerts/subscribe,
+    // which the API does not implement — its only alert route is /alerts/user.
+    // It 404'd on every mount and rejected unhandled. Removed rather than
+    // retried against an endpoint that does not exist.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filters]);
+  }, [filters.activeOnly, filters.severity]);
+
+  // Region is filtered here because the API has no parameter for it.
+  const storms = useMemo(() => {
+    const list = activeStorms || [];
+    return filters.region === 'all' ? list : list.filter((s) => s.region_name === filters.region);
+  }, [activeStorms, filters.region]);
 
   const handleStormSelect = (storm) => {
     setSelectedStorm(storm);
@@ -102,10 +135,9 @@ const StormIntelligence = () => {
               className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               <option value="all">All Regions</option>
-              <option value="atlantic">Atlantic</option>
-              <option value="pacific">Pacific</option>
-              <option value="gulf">Gulf of Mexico</option>
-              <option value="caribbean">Caribbean</option>
+              {regionNames.map((name) => (
+                <option key={name} value={name}>{name}</option>
+              ))}
             </select>
           </div>
           
@@ -147,18 +179,30 @@ const StormIntelligence = () => {
             <div className="p-4 border-b border-neutral-800">
               <h2 className="text-xl font-semibold text-white">Active Storms</h2>
               <p className="text-sm text-neutral-400">
-                {loading ? 'Loading...' : `${storms.length} storms detected`}
+                {loading ? 'Loading…' : error ? 'Storm feed unavailable' : `${storms.length} storms detected`}
               </p>
             </div>
-            
+
             <div className="overflow-y-auto h-[520px]">
               {loading ? (
                 <div className="flex items-center justify-center h-32">
                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
                 </div>
+              ) : error ? (
+                <div className="p-4">
+                  <Alert tone="error" title="Storm feed unavailable">
+                    {messageFor(error)} This is not an all-clear — no storm data could be read.
+                  </Alert>
+                  <button
+                    onClick={fetchStorms}
+                    className="mt-3 text-sm text-sky-400 hover:text-sky-300"
+                  >
+                    Try again
+                  </button>
+                </div>
               ) : storms.length === 0 ? (
                 <div className="flex items-center justify-center h-32 text-neutral-500">
-                  No storms found
+                  No active storms
                 </div>
               ) : (
                 storms.map((storm) => (

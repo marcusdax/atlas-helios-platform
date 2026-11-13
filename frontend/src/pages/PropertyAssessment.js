@@ -2,9 +2,15 @@ import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import toast from 'react-hot-toast';
 import { useProperty } from '../contexts/PropertyContext';
+import { Alert } from '../components/ui/kit';
+import { messageFor } from '../lib/api';
 
 const PropertyAssessment = () => {
-  const { properties, assessments, loading, fetchProperties, fetchAssessments, createAssessment } = useProperty();
+  // `error` was already tracked by the context and simply not read here, so a
+  // failed fetch rendered "No properties found" — an outage presented as an
+  // empty book of business, which is the one reading that makes someone stop
+  // looking for the problem.
+  const { properties, assessments, loading, error, fetchProperties, fetchAssessments, createAssessment } = useProperty();
   const [selectedProperty, setSelectedProperty] = useState(null);
   const [selectedAssessment, setSelectedAssessment] = useState(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -123,18 +129,30 @@ const PropertyAssessment = () => {
             <div className="p-4 border-b border-neutral-800">
               <h2 className="text-xl font-semibold text-white">Properties</h2>
               <p className="text-sm text-neutral-400">
-                {loading ? 'Loading...' : `${properties.length} properties`}
+                {loading ? 'Loading…' : error ? 'Could not load properties' : `${properties.length} properties`}
               </p>
             </div>
-            
+
             <div className="overflow-y-auto h-[520px]">
               {loading ? (
                 <div className="flex items-center justify-center h-32">
                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
                 </div>
+              ) : error ? (
+                <div className="p-4">
+                  <Alert tone="error" title="Could not load properties">
+                    {messageFor(error)}
+                  </Alert>
+                  <button
+                    onClick={fetchProperties}
+                    className="mt-3 text-sm text-sky-400 hover:text-sky-300"
+                  >
+                    Try again
+                  </button>
+                </div>
               ) : properties.length === 0 ? (
                 <div className="flex items-center justify-center h-32 text-neutral-500">
-                  No properties found
+                  No properties on file
                 </div>
               ) : (
                 properties.map((property) => (

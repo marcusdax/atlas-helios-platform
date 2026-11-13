@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { messageFor } from '../lib/api';
+import { ATTRIBUTION } from '../components/ui/kit';
 
 /**
  * The sign-in screen.
@@ -57,14 +58,21 @@ export default function Login() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-neutral-950 px-4 py-10">
       <div className="w-full max-w-sm">
+        {/*
+          Sign-in is brand chrome, not a tool surface, so this is the one place
+          in the product where the Atlas market accent is allowed to appear
+          (01 — Brand architecture §5). Everything past the gate uses the engine
+          palette, which is why the button below is brass rather than amber.
+        */}
         <div className="mb-8 text-center">
           <div
-            className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-blue-600 text-base font-bold text-white"
+            className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl text-base font-bold"
+            style={{ background: 'var(--brand)', color: 'var(--ink-950)' }}
             aria-hidden="true"
           >
-            AH
+            A
           </div>
-          <h1 className="text-2xl font-semibold text-neutral-100">Atlas Helios</h1>
+          <h1 className="font-display text-2xl font-bold text-neutral-100">Atlas</h1>
           <p className="mt-1 text-sm text-neutral-400">
             Storm intelligence and property assessment
           </p>
@@ -133,7 +141,7 @@ export default function Login() {
         </form>
 
         {process.env.NODE_ENV === 'development' && (
-          <p className="mt-5 text-center text-xs leading-relaxed text-neutral-500">
+          <p className="mt-5 text-center font-mono text-xs leading-relaxed text-neutral-500">
             Development seed account:
             <br />
             <code className="text-neutral-400">dev@atlashelios.test</code>
@@ -141,6 +149,10 @@ export default function Login() {
             <code className="text-neutral-400">atlas-dev-password</code>
           </p>
         )}
+
+        <p className="mt-8 text-center text-[11px] leading-relaxed text-neutral-500">
+          {ATTRIBUTION}
+        </p>
       </div>
     </div>
   );

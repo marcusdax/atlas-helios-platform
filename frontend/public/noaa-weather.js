@@ -8,7 +8,12 @@
 class NOAAWeatherClient {
     constructor() {
         this.baseUrl = 'https://api.weather.gov';
-        this.userAgent = 'Luminall-PropertyInsight/1.0 (contact@luminall.ai)';
+        // NWS asks callers to identify themselves. This said
+        // "Luminall-PropertyInsight/1.0 (contact@luminall.ai)" — two retired
+        // marks and a contact that no longer resolves, sent to a third party on
+        // every request. Forbidden strings §3 covers exports and metadata, and
+        // an outbound User-Agent is both.
+        this.userAgent = 'atlas-helios-platform/1.0';
         this.cache = new Map();
         this.cacheTTL = 300000; // 5 minutes
     }

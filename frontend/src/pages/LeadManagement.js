@@ -1,586 +1,379 @@
-import React, { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
+import React, { useMemo, useState } from 'react';
 import toast from 'react-hot-toast';
+import { api, messageFor } from '../lib/api';
+import { useApi, useAction } from '../lib/useApi';
+import {
+  PageHeader, Card, Button, Input, Select, TextArea, Field, control,
+  AsyncState, Table, Badge, RiskBadge, Alert, money, when
+} from '../components/ui/kit';
 
-const LeadManagement = () => {
-  const [leads, setLeads] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [selectedLead, setSelectedLead] = useState(null);
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [filters, setFilters] = useState({
-    status: 'all',
-    priority: 'all',
-    source: 'all'
+/**
+ * The lead pipeline.
+ *
+ * This page used to render a hardcoded `mockLeads` array - two invented people
+ * with invented phone numbers at Florida addresses, while the product's data is
+ * in Texas - and creating a lead appended an object to that array with
+ * `Math.floor(Math.random() * 40) + 60` as its score. A lead score drives who a
+ * crew calls first, so a random one is worse than none: it is a real number,
+ * shown with authority, meaning nothing.
+ *
+ * Three things the mock implied are not true of the real model, and the form
+ * below is shaped by all three:
+ *
+ * - A lead belongs to a *property*. `property_id` is required by the API, which
+ *   is why the form picks from real properties instead of taking a typed
+ *   address. The address, city and risk shown in the table come from that join,
+ *   so they cannot disagree with the property record.
+ * - The score is computed server-side from the property's damage probability
+ *   and the lead's own state. The client reads it and never invents it.
+ * - `priority` did not exist. It had no column, no API field and no storage, so
+ *   the value picked in the old form was discarded on the next read. It is gone
+ *   rather than reimplemented, because the real ordering signal is the score.
+ *
+ * The old status list offered "converted", which the API rejects: the real
+ * terminal states are won, lost and closed.
+ */
+
+/** The API's own enums. Kept here so an invalid value cannot reach it. */
+const STATUSES = ['new', 'contacted', 'qualified', 'quoted', 'won', 'lost', 'closed'];
+const SOURCES = ['storm_alert', 'canvass', 'referral', 'inbound', 'campaign'];
+
+const STATUS_TONE = {
+  new: 'info', contacted: 'warn', qualified: 'good',
+  quoted: 'good', won: 'good', lost: 'bad', closed: 'neutral'
+};
+
+/** The one step forward from each state, or null where the pipeline ends. */
+const NEXT = { new: 'contacted', contacted: 'qualified', qualified: 'quoted', quoted: 'won' };
+
+const humanize = (s) => String(s || '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+
+const ALL = 'all';
+const asParam = (v) => (v === ALL ? undefined : v);
+
+export default function LeadManagement() {
+  const [filters, setFilters] = useState({ status: ALL, source: ALL, minScore: '' });
+  const [selected, setSelected] = useState(null);
+  const [showCreate, setShowCreate] = useState(false);
+
+  const leads = useApi(
+    (signal) => api.leads.list({
+      status: asParam(filters.status),
+      source: asParam(filters.source),
+      min_score: filters.minScore === '' ? undefined : Number(filters.minScore),
+      limit: 100
+    }, signal),
+    [filters.status, filters.source, filters.minScore]
+  );
+
+  // Needed by the create form, and only there. Loaded alongside rather than on
+  // open so the picker is populated the moment the form appears.
+  const properties = useApi((signal) => api.properties.list({ limit: 100 }, signal), []);
+
+  // Memoised because `?? []` yields a fresh array on every render, which would
+  // make the counts below recompute each time and defeat their useMemo.
+  const rows = useMemo(() => leads.data?.data ?? [], [leads.data]);
+  const propertyRows = useMemo(() => properties.data?.data ?? [], [properties.data]);
+
+  const counts = useMemo(() => {
+    const by = (s) => rows.filter((l) => l.status === s).length;
+    return { total: leads.data?.meta?.total ?? rows.length, qualified: by('qualified'), contacted: by('contacted'), won: by('won') };
+  }, [rows, leads.data]);
+
+  const advance = useAction(async (lead) => {
+    const next = NEXT[lead.status];
+    if (!next) return undefined;
+    const result = await api.leads.update(lead.id, { status: next });
+    toast.success(`Lead moved to ${humanize(next)}`);
+    leads.reload();
+    if (selected?.id === lead.id) setSelected({ ...lead, status: next });
+    return result;
   });
-  const [leadData, setLeadData] = useState({
-    name: '',
-    email: '',
-    phone: '',
-    propertyAddress: '',
-    source: 'website',
-    priority: 'medium',
-    notes: ''
-  });
-
-  useEffect(() => {
-    fetchLeads();
-  }, [filters]);
-
-  const fetchLeads = async () => {
-    try {
-      setLoading(true);
-      // Mock data - replace with actual API call
-      const mockLeads = [
-        {
-          id: 1,
-          name: 'John Smith',
-          email: 'john.smith@email.com',
-          phone: '(555) 123-4567',
-          propertyAddress: '123 Main St, Miami, FL',
-          source: 'website',
-          status: 'new',
-          priority: 'high',
-          score: 85,
-          createdAt: '2024-01-15T10:00:00Z',
-          lastActivity: '2024-01-15T14:30:00Z'
-        },
-        {
-          id: 2,
-          name: 'Sarah Johnson',
-          email: 'sarah.j@email.com',
-          phone: '(555) 987-6543',
-          propertyAddress: '456 Ocean Ave, Key West, FL',
-          source: 'referral',
-          status: 'contacted',
-          priority: 'medium',
-          score: 72,
-          createdAt: '2024-01-14T09:00:00Z',
-          lastActivity: '2024-01-15T11:00:00Z'
-        }
-      ];
-      setLeads(mockLeads);
-    } catch (error) {
-      toast.error('Failed to fetch leads');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleCreateLead = async (e) => {
-    e.preventDefault();
-    try {
-      // Mock API call - replace with actual implementation
-      const newLead = {
-        id: leads.length + 1,
-        ...leadData,
-        status: 'new',
-        score: Math.floor(Math.random() * 40) + 60,
-        createdAt: new Date().toISOString(),
-        lastActivity: new Date().toISOString()
-      };
-      setLeads([newLead, ...leads]);
-      setShowCreateModal(false);
-      setLeadData({
-        name: '',
-        email: '',
-        phone: '',
-        propertyAddress: '',
-        source: 'website',
-        priority: 'medium',
-        notes: ''
-      });
-      toast.success('Lead created successfully');
-    } catch (error) {
-      toast.error('Failed to create lead');
-    }
-  };
-
-  const updateLeadStatus = async (leadId, newStatus) => {
-    try {
-      setLeads(leads.map(lead => 
-        lead.id === leadId 
-          ? { ...lead, status: newStatus, lastActivity: new Date().toISOString() }
-          : lead
-      ));
-      toast.success('Lead status updated');
-    } catch (error) {
-      toast.error('Failed to update lead status');
-    }
-  };
-
-  const getScoreColor = (score) => {
-    if (score >= 80) return 'text-green-400';
-    if (score >= 60) return 'text-yellow-400';
-    return 'text-red-400';
-  };
-
-  const getStatusColor = (status) => {
-    const colors = {
-      'new': 'text-blue-400 bg-blue-900/20 border-blue-800',
-      'contacted': 'text-yellow-400 bg-yellow-900/20 border-yellow-800',
-      'qualified': 'text-green-400 bg-green-900/20 border-green-800',
-      'converted': 'text-purple-400 bg-purple-900/20 border-purple-800',
-      'lost': 'text-red-400 bg-red-900/20 border-red-800'
-    };
-    return colors[status] || 'text-gray-400 bg-gray-900/20 border-gray-800';
-  };
-
-  const getPriorityColor = (priority) => {
-    const colors = {
-      'low': 'text-green-400',
-      'medium': 'text-yellow-400',
-      'high': 'text-orange-400',
-      'critical': 'text-red-400'
-    };
-    return colors[priority] || 'text-gray-400';
-  };
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <motion.div
-        initial={{ opacity: 0, y: -20 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="flex justify-between items-center"
-      >
-        <div>
-          <h1 className="text-3xl font-bold text-white mb-2">Lead Management</h1>
-          <p className="text-neutral-400">Manage and track property leads throughout the sales pipeline</p>
-        </div>
-        
-        <motion.button
-          whileHover={{ scale: 1.02 }}
-          whileTap={{ scale: 0.98 }}
-          onClick={() => setShowCreateModal(true)}
-          className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors"
-        >
-          Add New Lead
-        </motion.button>
-      </motion.div>
+      <PageHeader
+        title="Lead Management"
+        subtitle="Leads raised against tracked properties, scored by the API from each property's damage probability."
+        actions={<Button onClick={() => setShowCreate(true)}>Add lead</Button>}
+      />
 
-      {/* Statistics */}
-      <motion.div
-        initial={{ opacity: 0, y: -10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.1 }}
-        className="grid grid-cols-1 md:grid-cols-4 gap-4"
-      >
-        <div className="bg-neutral-900 rounded-lg border border-neutral-800 p-4">
-          <div className="text-2xl font-bold text-blue-400">{leads.length}</div>
-          <div className="text-sm text-neutral-400">Total Leads</div>
-        </div>
-        <div className="bg-neutral-900 rounded-lg border border-neutral-800 p-4">
-          <div className="text-2xl font-bold text-green-400">
-            {leads.filter(l => l.status === 'qualified').length}
-          </div>
-          <div className="text-sm text-neutral-400">Qualified</div>
-        </div>
-        <div className="bg-neutral-900 rounded-lg border border-neutral-800 p-4">
-          <div className="text-2xl font-bold text-yellow-400">
-            {leads.filter(l => l.status === 'contacted').length}
-          </div>
-          <div className="text-sm text-neutral-400">Contacted</div>
-        </div>
-        <div className="bg-neutral-900 rounded-lg border border-neutral-800 p-4">
-          <div className="text-2xl font-bold text-purple-400">
-            {leads.filter(l => l.status === 'converted').length}
-          </div>
-          <div className="text-sm text-neutral-400">Converted</div>
-        </div>
-      </motion.div>
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+        {[
+          ['Total leads', counts.total],
+          ['Contacted', counts.contacted],
+          ['Qualified', counts.qualified],
+          ['Won', counts.won]
+        ].map(([label, value]) => (
+          <Card key={label}>
+            <div className="text-2xl font-bold tabular-nums text-neutral-100">
+              {leads.loading ? '—' : value}
+            </div>
+            <div className="text-sm text-neutral-400">{label}</div>
+          </Card>
+        ))}
+      </div>
 
-      {/* Filters */}
-      <motion.div
-        initial={{ opacity: 0, y: -10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.2 }}
-        className="bg-neutral-900 rounded-lg p-4 border border-neutral-800"
-      >
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-neutral-400 mb-2">Status</label>
-            <select
-              value={filters.status}
-              onChange={(e) => setFilters({ ...filters, status: e.target.value })}
-              className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              <option value="all">All Status</option>
-              <option value="new">New</option>
-              <option value="contacted">Contacted</option>
-              <option value="qualified">Qualified</option>
-              <option value="converted">Converted</option>
-              <option value="lost">Lost</option>
-            </select>
-          </div>
-          
-          <div>
-            <label className="block text-sm font-medium text-neutral-400 mb-2">Priority</label>
-            <select
-              value={filters.priority}
-              onChange={(e) => setFilters({ ...filters, priority: e.target.value })}
-              className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              <option value="all">All Priorities</option>
-              <option value="low">Low</option>
-              <option value="medium">Medium</option>
-              <option value="high">High</option>
-              <option value="critical">Critical</option>
-            </select>
-          </div>
-          
-          <div>
-            <label className="block text-sm font-medium text-neutral-400 mb-2">Source</label>
-            <select
-              value={filters.source}
-              onChange={(e) => setFilters({ ...filters, source: e.target.value })}
-              className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              <option value="all">All Sources</option>
-              <option value="website">Website</option>
-              <option value="referral">Referral</option>
-              <option value="social">Social Media</option>
-              <option value="email">Email</option>
-            </select>
-          </div>
-          
+      <Card title="Filters">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+          <Select
+            id="f-status" label="Status" value={filters.status}
+            onChange={(e) => setFilters({ ...filters, status: e.target.value })}
+            options={[{ value: ALL, label: 'All statuses' }, ...STATUSES.map((s) => ({ value: s, label: humanize(s) }))]}
+          />
+          <Select
+            id="f-source" label="Source" value={filters.source}
+            onChange={(e) => setFilters({ ...filters, source: e.target.value })}
+            options={[{ value: ALL, label: 'All sources' }, ...SOURCES.map((s) => ({ value: s, label: humanize(s) }))]}
+          />
+          <Input
+            id="f-score" label="Minimum score" type="number" min="0" max="100"
+            placeholder="any" value={filters.minScore}
+            onChange={(e) => setFilters({ ...filters, minScore: e.target.value })}
+          />
           <div className="flex items-end">
-            <button
-              onClick={() => setFilters({ status: 'all', priority: 'all', source: 'all' })}
-              className="w-full bg-neutral-800 hover:bg-neutral-700 text-white px-4 py-2 rounded-lg transition-colors"
-            >
-              Reset Filters
-            </button>
+            <Button tone="ghost" className="w-full"
+              onClick={() => setFilters({ status: ALL, source: ALL, minScore: '' })}>
+              Reset
+            </Button>
           </div>
         </div>
-      </motion.div>
+      </Card>
 
-      {/* Leads List */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.3 }}
-        className="bg-neutral-900 rounded-lg border border-neutral-800"
+      <Card
+        title="Pipeline"
+        actions={<Button tone="ghost" onClick={leads.reload} busy={leads.loading}>Refresh</Button>}
       >
-        <div className="p-4 border-b border-neutral-800">
-          <h2 className="text-xl font-semibold text-white">Lead Pipeline</h2>
-        </div>
-        
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-neutral-800">
-                <th className="text-left p-4 text-neutral-400 font-medium">Lead</th>
-                <th className="text-left p-4 text-neutral-400 font-medium">Contact</th>
-                <th className="text-left p-4 text-neutral-400 font-medium">Property</th>
-                <th className="text-left p-4 text-neutral-400 font-medium">Status</th>
-                <th className="text-left p-4 text-neutral-400 font-medium">Score</th>
-                <th className="text-left p-4 text-neutral-400 font-medium">Source</th>
-                <th className="text-left p-4 text-neutral-400 font-medium">Priority</th>
-                <th className="text-left p-4 text-neutral-400 font-medium">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                <tr>
-                  <td colSpan="8" className="text-center p-8">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto"></div>
-                  </td>
-                </tr>
-              ) : leads.length === 0 ? (
-                <tr>
-                  <td colSpan="8" className="text-center p-8 text-neutral-500">
-                    No leads found
-                  </td>
-                </tr>
-              ) : (
-                leads.map((lead) => (
-                  <motion.tr
-                    key={lead.id}
-                    initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    whileHover={{ backgroundColor: 'rgba(59, 130, 246, 0.05)' }}
-                    className="border-b border-neutral-800 cursor-pointer transition-colors"
-                    onClick={() => setSelectedLead(lead)}
-                  >
-                    <td className="p-4">
-                      <div>
-                        <div className="font-medium text-white">{lead.name}</div>
-                        <div className="text-sm text-neutral-400">
-                          Added {new Date(lead.createdAt).toLocaleDateString()}
-                        </div>
-                      </div>
-                    </td>
-                    <td className="p-4">
-                      <div className="text-sm">
-                        <div className="text-white">{lead.email}</div>
-                        <div className="text-neutral-400">{lead.phone}</div>
-                      </div>
-                    </td>
-                    <td className="p-4">
-                      <div className="text-sm text-white">{lead.propertyAddress}</div>
-                    </td>
-                    <td className="p-4">
-                      <span className={`px-2 py-1 text-xs rounded-full border ${getStatusColor(lead.status)}`}>
-                        {lead.status}
-                      </span>
-                    </td>
-                    <td className="p-4">
-                      <div className={`font-bold ${getScoreColor(lead.score)}`}>
-                        {lead.score}
-                      </div>
-                    </td>
-                    <td className="p-4">
-                      <div className="text-sm text-neutral-400">{lead.source}</div>
-                    </td>
-                    <td className="p-4">
-                      <div className={`text-sm font-medium ${getPriorityColor(lead.priority)}`}>
-                        {lead.priority}
-                      </div>
-                    </td>
-                    <td className="p-4">
-                      <div className="flex gap-2">
-                        {lead.status === 'new' && (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              updateLeadStatus(lead.id, 'contacted');
-                            }}
-                            className="text-blue-400 hover:text-blue-300 text-sm"
-                          >
-                            Contact
-                          </button>
-                        )}
-                        {lead.status === 'contacted' && (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              updateLeadStatus(lead.id, 'qualified');
-                            }}
-                            className="text-green-400 hover:text-green-300 text-sm"
-                          >
-                            Qualify
-                          </button>
-                        )}
-                        {lead.status === 'qualified' && (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              updateLeadStatus(lead.id, 'converted');
-                            }}
-                            className="text-purple-400 hover:text-purple-300 text-sm"
-                          >
-                            Convert
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </motion.tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </motion.div>
-
-      {/* Selected Lead Details */}
-      {selectedLead && (
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="bg-neutral-900 rounded-lg border border-neutral-800 p-6"
+        <AsyncState
+          loading={leads.loading}
+          error={leads.error}
+          empty={rows.length === 0}
+          emptyMessage="No leads match these filters."
         >
-          <div className="flex justify-between items-start mb-4">
-            <h3 className="text-xl font-semibold text-white">Lead Details</h3>
-            <button
-              onClick={() => setSelectedLead(null)}
-              className="text-neutral-400 hover:text-white"
-            >
-              ×
-            </button>
+          <Table
+            columns={[
+              {
+                key: 'contact',
+                label: 'Contact',
+                render: (l) => (
+                  <div>
+                    <div className="font-medium text-neutral-100">{l.contact_name || 'No contact name'}</div>
+                    <div className="text-xs text-neutral-500">added {when(l.created_at)}</div>
+                  </div>
+                )
+              },
+              {
+                key: 'reach',
+                label: 'Reach',
+                render: (l) => (
+                  <div className="text-xs">
+                    <div>{l.contact_email || '—'}</div>
+                    <div className="text-neutral-500">{l.contact_phone || '—'}</div>
+                  </div>
+                )
+              },
+              {
+                key: 'property',
+                label: 'Property',
+                render: (l) => (
+                  <div className="text-xs">
+                    <div className="text-neutral-200">{l.address || '—'}</div>
+                    <div className="text-neutral-500">
+                      {[l.city, l.state].filter(Boolean).join(', ') || '—'}
+                      {l.estimated_value != null && ` · ${money(l.estimated_value)}`}
+                    </div>
+                  </div>
+                )
+              },
+              { key: 'status', label: 'Status', render: (l) => <Badge tone={STATUS_TONE[l.status]}>{humanize(l.status)}</Badge> },
+              { key: 'score', label: 'Score', render: (l) => <RiskBadge score={l.score} /> },
+              { key: 'source', label: 'Source', render: (l) => <span className="text-xs text-neutral-400">{humanize(l.source)}</span> },
+              {
+                key: 'actions',
+                label: '',
+                render: (l) => (NEXT[l.status] ? (
+                  <Button
+                    tone="ghost"
+                    busy={advance.pending}
+                    onClick={(e) => { e.stopPropagation(); advance.run(l); }}
+                  >
+                    Mark {humanize(NEXT[l.status]).toLowerCase()}
+                  </Button>
+                ) : null)
+              }
+            ]}
+            rows={rows}
+            keyOf={(l) => l.id}
+            onRowClick={setSelected}
+          />
+        </AsyncState>
+
+        {advance.error && (
+          <div className="mt-4"><Alert tone="error" title="Could not update that lead">{messageFor(advance.error)}</Alert></div>
+        )}
+      </Card>
+
+      {selected && (
+        <Card
+          title="Lead detail"
+          actions={<Button tone="ghost" onClick={() => setSelected(null)}>Close</Button>}
+        >
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+            <dl className="space-y-2 text-sm">
+              {[
+                ['Contact', selected.contact_name || '—'],
+                ['Email', selected.contact_email || '—'],
+                ['Phone', selected.contact_phone || '—'],
+                ['Source', humanize(selected.source)]
+              ].map(([k, v]) => (
+                <div key={k} className="flex justify-between gap-4">
+                  <dt className="text-neutral-400">{k}</dt>
+                  <dd className="text-right text-neutral-100">{v}</dd>
+                </div>
+              ))}
+            </dl>
+            <dl className="space-y-2 text-sm">
+              {[
+                ['Address', selected.address || '—'],
+                ['Damage probability', selected.damage_probability != null ? `${Math.round(selected.damage_probability)}%` : '—'],
+                ['Property value', money(selected.estimated_value)],
+                ['Last contact', when(selected.last_contact_attempt)]
+              ].map(([k, v]) => (
+                <div key={k} className="flex justify-between gap-4">
+                  <dt className="text-neutral-400">{k}</dt>
+                  <dd className="text-right text-neutral-100">{v}</dd>
+                </div>
+              ))}
+            </dl>
           </div>
-          
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
-              <h4 className="text-lg font-medium text-white mb-3">Contact Information</h4>
-              <div className="space-y-2">
-                <div className="flex justify-between">
-                  <span className="text-neutral-400">Name:</span>
-                  <span className="text-white">{selectedLead.name}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-neutral-400">Email:</span>
-                  <span className="text-white">{selectedLead.email}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-neutral-400">Phone:</span>
-                  <span className="text-white">{selectedLead.phone}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-neutral-400">Lead Score:</span>
-                  <span className={`font-bold ${getScoreColor(selectedLead.score)}`}>
-                    {selectedLead.score}
-                  </span>
-                </div>
-              </div>
-            </div>
-            
-            <div>
-              <h4 className="text-lg font-medium text-white mb-3">Property Information</h4>
-              <div className="space-y-2">
-                <div className="flex justify-between">
-                  <span className="text-neutral-400">Address:</span>
-                  <span className="text-white">{selectedLead.propertyAddress}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-neutral-400">Source:</span>
-                  <span className="text-white">{selectedLead.source}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-neutral-400">Priority:</span>
-                  <span className={`font-medium ${getPriorityColor(selectedLead.priority)}`}>
-                    {selectedLead.priority}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-neutral-400">Status:</span>
-                  <span className={`px-2 py-1 text-xs rounded-full border ${getStatusColor(selectedLead.status)}`}>
-                    {selectedLead.status}
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
-          
-          <div className="mt-6 flex gap-4">
-            <button className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors">
-              Create Assessment
-            </button>
-            <button className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg transition-colors">
-              Generate Estimate
-            </button>
-            <button className="bg-neutral-700 hover:bg-neutral-600 text-white px-4 py-2 rounded-lg transition-colors">
-              Schedule Follow-up
-            </button>
-          </div>
-        </motion.div>
+
+          {selected.notes && (
+            <p className="mt-4 whitespace-pre-wrap border-t border-neutral-800 pt-4 text-sm text-neutral-300">
+              {selected.notes}
+            </p>
+          )}
+        </Card>
       )}
 
-      {/* Create Lead Modal */}
-      {showCreateModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="bg-neutral-900 rounded-lg border border-neutral-800 p-6 w-full max-w-md"
-          >
-            <h3 className="text-xl font-semibold text-white mb-4">Add New Lead</h3>
-            
-            <form onSubmit={handleCreateLead} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-neutral-400 mb-2">Name</label>
-                <input
-                  type="text"
-                  value={leadData.name}
-                  onChange={(e) => setLeadData({ ...leadData, name: e.target.value })}
-                  className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  required
-                />
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-neutral-400 mb-2">Email</label>
-                <input
-                  type="email"
-                  value={leadData.email}
-                  onChange={(e) => setLeadData({ ...leadData, email: e.target.value })}
-                  className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  required
-                />
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-neutral-400 mb-2">Phone</label>
-                <input
-                  type="tel"
-                  value={leadData.phone}
-                  onChange={(e) => setLeadData({ ...leadData, phone: e.target.value })}
-                  className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-neutral-400 mb-2">Property Address</label>
-                <input
-                  type="text"
-                  value={leadData.propertyAddress}
-                  onChange={(e) => setLeadData({ ...leadData, propertyAddress: e.target.value })}
-                  className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  required
-                />
-              </div>
-              
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-neutral-400 mb-2">Source</label>
-                  <select
-                    value={leadData.source}
-                    onChange={(e) => setLeadData({ ...leadData, source: e.target.value })}
-                    className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="website">Website</option>
-                    <option value="referral">Referral</option>
-                    <option value="social">Social Media</option>
-                    <option value="email">Email</option>
-                  </select>
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-neutral-400 mb-2">Priority</label>
-                  <select
-                    value={leadData.priority}
-                    onChange={(e) => setLeadData({ ...leadData, priority: e.target.value })}
-                    className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="low">Low</option>
-                    <option value="medium">Medium</option>
-                    <option value="high">High</option>
-                    <option value="critical">Critical</option>
-                  </select>
-                </div>
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-neutral-400 mb-2">Notes</label>
-                <textarea
-                  value={leadData.notes}
-                  onChange={(e) => setLeadData({ ...leadData, notes: e.target.value })}
-                  className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  rows={3}
-                  placeholder="Additional notes about this lead..."
-                />
-              </div>
-              
-              <div className="flex gap-4 pt-4">
-                <button
-                  type="submit"
-                  className="flex-1 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors"
-                >
-                  Add Lead
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowCreateModal(false)}
-                  className="flex-1 bg-neutral-700 hover:bg-neutral-600 text-white px-4 py-2 rounded-lg transition-colors"
-                >
-                  Cancel
-                </button>
-              </div>
-            </form>
-          </motion.div>
-        </div>
+      {showCreate && (
+        <CreateLead
+          properties={propertyRows}
+          propertiesState={properties}
+          onClose={() => setShowCreate(false)}
+          onCreated={() => { setShowCreate(false); leads.reload(); }}
+        />
       )}
     </div>
   );
-};
+}
 
-export default LeadManagement;
+/**
+ * The create form.
+ *
+ * Kept as its own component so its state dies with it: the old page held the
+ * draft in the page body and hand-reset every field after a submit, which is
+ * how a half-typed lead survived a cancel and reappeared next time.
+ */
+function CreateLead({ properties, propertiesState, onClose, onCreated }) {
+  const [form, setForm] = useState({
+    property_id: '', contact_name: '', contact_email: '', contact_phone: '',
+    source: 'storm_alert', notes: ''
+  });
+  /** Set when the API reports an open lead already covers this property. */
+  const [existing, setExisting] = useState(null);
+
+  const create = useAction(async () => {
+    const body = { property_id: form.property_id, source: form.source };
+    // Only send what was filled in: the API validates an empty string as an
+    // invalid email rather than treating it as absent.
+    ['contact_name', 'contact_email', 'contact_phone', 'notes'].forEach((k) => {
+      if (form[k].trim()) body[k] = form[k].trim();
+    });
+    const result = await api.leads.create(body);
+
+    // The API keeps one open lead per property, so that two reps do not knock
+    // on the same door. When one already exists it answers 200 with
+    // `created: false` and hands back the existing lead instead of making a
+    // second. That is a success at the HTTP level and a no-op at the business
+    // level, so reporting it as "Lead created" would be the familiar lie: a
+    // green toast, a closed dialog, and no new row anywhere.
+    if (result?.meta?.created === false) {
+      setExisting(result.data);
+      return result;
+    }
+
+    toast.success('Lead created');
+    onCreated();
+    return result;
+  });
+
+  const set = (k) => (e) => {
+    // The "already has an open lead" notice is about one property, so it stops
+    // applying the moment a different one is chosen.
+    if (k === 'property_id') setExisting(null);
+    setForm({ ...form, [k]: e.target.value });
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+      <div role="dialog" aria-modal="true" aria-labelledby="create-lead-title"
+        className="w-full max-w-md overflow-y-auto rounded-xl border border-neutral-800 bg-neutral-900 p-6"
+        style={{ maxHeight: '90vh' }}>
+        <h2 id="create-lead-title" className="mb-4 text-lg font-semibold text-neutral-100">Add lead</h2>
+
+        <form
+          className="space-y-4"
+          onSubmit={(e) => { e.preventDefault(); if (!create.pending) create.run(); }}
+        >
+          <Field id="property" label="Property" hint="A lead is raised against a property already on file.">
+            {propertiesState.loading ? (
+              <p className="text-sm text-neutral-500">Loading properties…</p>
+            ) : propertiesState.error ? (
+              <Alert tone="error">{messageFor(propertiesState.error)}</Alert>
+            ) : properties.length === 0 ? (
+              <Alert tone="warn">No properties on file yet. Add one before raising a lead.</Alert>
+            ) : (
+              <select id="property" required className={control} value={form.property_id} onChange={set('property_id')}>
+                <option value="">Select a property…</option>
+                {properties.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.address}{p.city ? `, ${p.city}` : ''}
+                  </option>
+                ))}
+              </select>
+            )}
+          </Field>
+
+          <Input id="name" label="Contact name" value={form.contact_name} onChange={set('contact_name')} />
+          <Input id="email" label="Email" type="email" value={form.contact_email} onChange={set('contact_email')} />
+          <Input id="phone" label="Phone" type="tel" value={form.contact_phone} onChange={set('contact_phone')} />
+
+          <Select
+            id="source" label="Source" value={form.source} onChange={set('source')}
+            options={SOURCES.map((s) => ({ value: s, label: humanize(s) }))}
+          />
+
+          <TextArea id="notes" label="Notes" rows={3} value={form.notes} onChange={set('notes')} />
+
+          {create.error && <Alert tone="error" title="Could not create the lead">{messageFor(create.error)}</Alert>}
+
+          {existing && (
+            <Alert tone="warn" title="That property already has an open lead">
+              {existing.contact_name ? `It is held by "${existing.contact_name}" and is ` : 'It is '}
+              currently <strong>{humanize(existing.status)}</strong>. Nothing was created — the API keeps one
+              open lead per property so two reps do not work the same door. Close or win the existing lead
+              first, or pick a different property.
+            </Alert>
+          )}
+
+          <div className="flex gap-3 pt-2">
+            <Button type="submit" className="flex-1" busy={create.pending} disabled={!form.property_id}>
+              Add lead
+            </Button>
+            <Button type="button" tone="ghost" className="flex-1" onClick={onClose}>Cancel</Button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
