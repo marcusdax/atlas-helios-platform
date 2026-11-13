@@ -157,7 +157,7 @@ class StormService {
     try {
       const response = await axios.get('https://api.weather.gov/points/' + lat + ',' + lng, {
         headers: {
-          'User-Agent': 'PropertyInsight-AI/1.0 (contact@propertyinsight.ai)',
+          'User-Agent': process.env.NWS_USER_AGENT || 'atlas-helios-platform/1.0',
           'Accept': 'application/geo+json'
         },
         timeout: 10000
@@ -168,7 +168,7 @@ class StormService {
       // Get forecast from grid point
       const forecastResponse = await axios.get(gridInfo.properties.forecast, {
         headers: {
-          'User-Agent': 'PropertyInsight-AI/1.0 (contact@propertyinsight.ai)'
+          'User-Agent': process.env.NWS_USER_AGENT || 'atlas-helios-platform/1.0'
         },
         timeout: 10000
       });

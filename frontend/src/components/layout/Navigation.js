@@ -43,9 +43,17 @@ const Navigation = () => {
 
   return (
     <nav className="nav-sidebar">
-      {/* Logo */}
-      <div className="nav-logo">
-        <span className="text-sm font-bold">AH</span>
+      {/*
+        The masthead mark. "AH" stood for Atlas + Helios, but Helios is not a
+        confirmed market — the blueprint records its existence as an open brand
+        decision and its accent as unresolved — so a mark that asserts two
+        brands asserts one that has not been decided. This surface is Atlas.
+
+        The logo is brand chrome, which is where a market accent belongs; every
+        control below it stays on the engine palette.
+      */}
+      <div className="nav-logo" style={{ background: 'var(--brand)', color: 'var(--ink-950)' }}>
+        <span className="font-display text-base font-bold" title="Atlas — an AUCTUM-powered platform">A</span>
       </div>
 
       {/* Navigation Items */}

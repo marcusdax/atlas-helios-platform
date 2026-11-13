@@ -98,11 +98,17 @@ const Dashboard = () => {
           className="flex flex-wrap items-start justify-between gap-4"
         >
           <div>
-            <h1 className="mb-2 text-4xl font-bold text-neutral-100">
-              PropertyInsight Dashboard
+            {/*
+              "PropertyInsight" was a release blocker, not a style preference:
+              01 — Brand architecture §3 lists it among the forbidden strings as
+              a retired engine mark that "collides with a live product and a
+              registered mark". Atlas is the canonical name for this market.
+            */}
+            <h1 className="mb-2 font-display text-4xl font-bold text-neutral-100">
+              Atlas Storm Desk
             </h1>
             <p className="text-neutral-400">
-              Real-time storm intelligence and property assessment platform
+              Storm intelligence and property assessment for restoration crews
             </p>
           </div>
 

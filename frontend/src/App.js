@@ -46,6 +46,7 @@ import { DashboardDataProvider } from './data/useDashboardData';
 import { StormProvider } from './contexts/StormContext';
 import { PropertyProvider } from './contexts/PropertyContext';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { AttributionFooter } from './components/ui/kit';
 
 /**
  * The application shell.
@@ -150,6 +151,14 @@ function AuthenticatedApp() {
                         <Route path="/system" element={<SystemStatus />} />
                       </Routes>
                     </motion.div>
+
+                    {/*
+                      One attribution string per tier, no improvisation
+                      (01 — Brand architecture §7). Inside the scroll container
+                      so it closes the content rather than pinning itself over
+                      the page.
+                    */}
+                    <AttributionFooter className="mt-8" />
                   </main>
                 </div>
 

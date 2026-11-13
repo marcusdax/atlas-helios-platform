@@ -66,7 +66,7 @@ const UPSTREAM = {
   timeout: 15000,
   headers: {
     // api.weather.gov requires a User-Agent identifying the caller.
-    'User-Agent': process.env.NWS_USER_AGENT || '(atlas-helios-platform, support@propertyinsight.ai)',
+    'User-Agent': process.env.NWS_USER_AGENT || 'atlas-helios-platform/1.0',
     Accept: 'application/geo+json'
   }
 };

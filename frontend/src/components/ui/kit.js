@@ -181,3 +181,78 @@ export const money = (value) =>
 
 export const when = (value) =>
   value ? new Date(value).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : '—';
+
+/**
+ * The attribution line.
+ *
+ * 01 — Brand architecture §7 gives one footer string per tier and says "no
+ * improvisation", so this is not a template to fill in differently per page.
+ * Atlas is an L3 service brand, which takes the market form below.
+ *
+ * ODASI is named as the engineering entity and never as a brand (§1).
+ */
+export const ATTRIBUTION =
+  '© 2026 AUCTUM Inc. · Atlas is an AUCTUM-powered platform · Engineered by ODASI Technologies Inc.';
+
+export const AttributionFooter = ({ className = '' }) => (
+  <footer className={`border-t border-neutral-800 px-6 py-4 ${className}`}>
+    <p className="text-xs leading-relaxed text-neutral-400">{ATTRIBUTION}</p>
+  </footer>
+);
+
+/**
+ * The AUCTUM seal, in its two legitimate states.
+ *
+ * Deliberately strict, because 01 §4 calls the seal "the estate's most valuable
+ * and most abusable asset":
+ *
+ *   - It is never decorative. `state="hidden"` renders nothing at all.
+ *   - There is no crossed-out seal. A failed state is not a variant, because
+ *     "showing a failed seal invites the reader to believe the failed state is
+ *     auditable — it is not". Absence is the information.
+ *   - It carries an as-of date, since "a seal without an as-of date becomes a
+ *     lie by next week".
+ *   - It is vector, for print and PDF.
+ *
+ * Sizes follow §4: 64px on public trust pages, 32px in-product.
+ */
+export function AuctumSeal({ state = 'hidden', asOf, size = 32, market = 'ATLAS' }) {
+  if (state !== 'earned' && state !== 'pending') return null;
+
+  const earned = state === 'earned';
+  const ring = earned ? 'var(--brass)' : 'var(--ink-700)';
+  const label = earned ? 'Verified by AUCTUM' : 'Evidence pending';
+
+  return (
+    <span className="inline-flex items-center gap-2" title={label}>
+      <svg
+        width={size} height={size} viewBox="0 0 64 64" role="img"
+        aria-label={`${label}${asOf ? `, as of ${when(asOf)}` : ''}`}
+      >
+        <path
+          d="M32 4 L54 17 L54 43 L32 56 L10 43 L10 17 Z"
+          fill="none" stroke={ring} strokeWidth="3.5"
+          strokeDasharray={earned ? undefined : '5 4'}
+        />
+        <path d="M18 34 L46 34" stroke={ring} strokeWidth="3" />
+        {earned && (
+          <path
+            d="M23 27 L29 33 L42 20" fill="none" stroke="var(--proof)"
+            strokeWidth="4.5" strokeLinecap="round" strokeLinejoin="round"
+          />
+        )}
+      </svg>
+      <span className="flex flex-col leading-tight">
+        <span
+          className={`text-[10px] font-semibold uppercase tracking-[0.16em] ${earned ? 'text-neutral-100' : 'text-neutral-400'}`}
+        >
+          {label}
+        </span>
+        <span className="font-display text-[11px] font-bold tracking-wide text-neutral-300">
+          {market}
+          {asOf && <span className="ml-1.5 font-mono text-[10px] font-normal text-neutral-400">as of {when(asOf)}</span>}
+        </span>
+      </span>
+    </span>
+  );
+}
