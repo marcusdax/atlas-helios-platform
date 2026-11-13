@@ -4,6 +4,20 @@ const { authMiddleware, generateToken, generateRefreshToken, verifyRefreshToken 
 const { asyncHandler } = require('../middleware/errorHandler');
 const db = require('../../config/database');
 const logger = require('../utils/logger');
+/*
+  Ids come from node:crypto, via the same helper the other routers use.
+
+  These call sites each inlined the uuid package's v4 generator, required
+  lazily inside the handler. Dependabot then moved uuid 9.0.1 to 14.0.3, which is
+  "type": "module" with no require export — so `require('uuid')` only still
+  works here because Node 22 can require an ES module. On an older Node, and
+  under Jest, it throws at request time, which is why register, refresh and
+  password reset returned 500 while the server itself started cleanly.
+
+  randomUUID is built in, is the same v4 shape, and cannot be bumped out from
+  under the handler.
+*/
+const { newId } = require('./_helpers');
 
 const router = express.Router();
 
@@ -68,7 +82,7 @@ router.post('/register', asyncHandler(async (req, res) => {
     company = await db('companies').where('name', companyName).first();
     if (!company) {
       company = {
-        id: require('uuid').v4(),
+        id: newId(),
         name: companyName,
         created_at: new Date().toISOString()
       };
@@ -78,7 +92,7 @@ router.post('/register', asyncHandler(async (req, res) => {
 
   // Create user
   const user = {
-    id: require('uuid').v4(),
+    id: newId(),
     name,
     email,
     password: hashedPassword,
@@ -98,7 +112,7 @@ router.post('/register', asyncHandler(async (req, res) => {
 
   // Save refresh token
   await db('refresh_tokens').insert({
-    id: require('uuid').v4(),
+    id: newId(),
     user_id: user.id,
     token: refreshToken,
     expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(), // 7 days
@@ -178,7 +192,7 @@ router.post('/login', asyncHandler(async (req, res) => {
 
   // Save refresh token
   await db('refresh_tokens').insert({
-    id: require('uuid').v4(),
+    id: newId(),
     user_id: user.id,
     token: refreshToken,
     expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(), // 7 days
@@ -480,12 +494,12 @@ router.post('/forgot-password', asyncHandler(async (req, res) => {
   }
 
   // Generate reset token
-  const resetToken = require('uuid').v4();
+  const resetToken = newId();
   const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString(); // 1 hour
 
   // Save reset token
   await db('password_resets').insert({
-    id: require('uuid').v4(),
+    id: newId(),
     user_id: user.id,
     token: resetToken,
     expires_at: expiresAt,
