@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { messageFor } from '../lib/api';
-import { ATTRIBUTION } from '../components/ui/kit';
+import { ATTRIBUTION, Alert } from '../components/ui/kit';
+import { demoLogin } from '../lib/demoLogin';
 
 /**
  * The sign-in screen.
@@ -19,8 +20,15 @@ import { ATTRIBUTION } from '../components/ui/kit';
  */
 export default function Login() {
   const { login } = useAuth();
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  /*
+    The demo account arrives already selected where one is configured, so
+    signing in is a single click. It is off in a production build unless
+    someone opts in and supplies credentials — see lib/demoLogin.js — and
+    whenever it is on, the banner below says so rather than letting a filled
+    form pass for the viewer's own saved login.
+  */
+  const [email, setEmail] = useState(demoLogin.enabled ? demoLogin.email : '');
+  const [password, setPassword] = useState(demoLogin.enabled ? demoLogin.password : '');
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
 
@@ -87,6 +95,40 @@ export default function Login() {
             Sign in
           </h2>
 
+          {/*
+            Stated, not implied. A form that arrives filled in should say whose
+            credentials those are — otherwise the obvious reading is "my
+            browser saved this", and the next obvious move is to trust it.
+          */}
+          {demoLogin.enabled && (
+            <div className="mb-5 rounded-lg border border-brass-700 bg-brass-500/10 px-3 py-2.5">
+              <p className="text-xs font-semibold uppercase tracking-wider text-brass-300">
+                {demoLogin.label}
+              </p>
+              <p className="mt-1 text-xs leading-relaxed text-neutral-300">
+                Filled in for you — press <strong>Sign in</strong>. This is a shared demo
+                account, not a personal login.
+              </p>
+              <button
+                type="button"
+                onClick={() => { setEmail(''); setPassword(''); }}
+                className="mt-2 text-xs text-neutral-400 underline underline-offset-2 hover:text-neutral-200"
+              >
+                Use a different account
+              </button>
+            </div>
+          )}
+
+          {demoLogin.misconfigured && (
+            <div className="mb-5">
+              <Alert tone="warn" title="Demo sign-in is enabled but has no account">
+                REACT_APP_DEMO_LOGIN is set, but this is a production build and no
+                REACT_APP_DEMO_EMAIL / REACT_APP_DEMO_PASSWORD was supplied. Nothing has been
+                pre-filled — a production bundle carries no default credentials.
+              </Alert>
+            </div>
+          )}
+
           <div className="mb-4">
             <label htmlFor="login-email" className="mb-1.5 block text-sm text-neutral-300">
               Email
@@ -133,6 +175,11 @@ export default function Login() {
 
           <button
             type="submit"
+            /* Focused when the fields are already filled, so the demo account
+               is genuinely one keypress away and a screen reader lands on the
+               thing left to do. */
+            // eslint-disable-next-line jsx-a11y/no-autofocus
+            autoFocus={demoLogin.enabled}
             disabled={busy || !email || !password}
             className="w-full rounded-lg bg-blue-600 px-4 py-2.5 font-medium text-white transition hover:bg-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-2 focus:ring-offset-neutral-900 disabled:cursor-not-allowed disabled:opacity-50"
           >
@@ -140,15 +187,9 @@ export default function Login() {
           </button>
         </form>
 
-        {process.env.NODE_ENV === 'development' && (
-          <p className="mt-5 text-center font-mono text-xs leading-relaxed text-neutral-500">
-            Development seed account:
-            <br />
-            <code className="text-neutral-400">dev@atlashelios.test</code>
-            {' · '}
-            <code className="text-neutral-400">atlas-dev-password</code>
-          </p>
-        )}
+        {/* The credential hint that used to sit here is redundant now the
+            fields arrive filled; the banner inside the form says which account
+            it is. */}
 
         <p className="mt-8 text-center text-[11px] leading-relaxed text-neutral-500">
           {ATTRIBUTION}
