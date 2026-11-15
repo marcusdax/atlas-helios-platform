@@ -9,6 +9,7 @@ const db = require('./config/database');
 const sentinelApi = require('./sentinel_api');
 const computerVisionService = require('./src/services/ComputerVisionService');
 const weatherRoutes = require('./src/routes/weatherRoutes');
+const masternexSpatialRoutes = require('./src/routes/masternexSpatialRoutes');
 const stormService = require('./src/services/StormService');
 
 // Initialize ComputerVisionService
@@ -26,6 +27,7 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // Weather Routes
 app.use('/api/weather', weatherRoutes);
+app.use('/api/masternex/spatial', masternexSpatialRoutes);
 
 // In-memory fallbacks and mutation state
 const DEFAULT_PROPERTIES = [
