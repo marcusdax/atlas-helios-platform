@@ -1,0 +1,8 @@
+dist
+node_modules
+OpenRadar-clone
+server
+coverage
+*.config.js
+*.config.cjs
+.eslintrc.cjs

@@ -1,0 +1,4 @@
+FROM caddy:2-alpine
+COPY dist /srv
+COPY Caddyfile.archival /etc/caddy/Caddyfile
+EXPOSE 8080

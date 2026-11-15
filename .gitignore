@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+server/node_modules/
+
+# Build & Runtime
+dist/
+logs/
+*.log
+.server.pid
+
+# Secrets & Environment
+.env
+.env.local
+.env.*.local
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+
+# External clones
+OpenRadar-clone/
+
+# OS & Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

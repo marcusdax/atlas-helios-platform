@@ -1,0 +1,4 @@
+FROM caddy:2-alpine
+COPY dist /srv
+RUN printf ":3000 {\n\tencode gzip zstd\n\thandle /api/* {\n\t\treverse_proxy backend:3004\n\t}\n\thandle {\n\t\troot * /srv\n\t\ttry_files {path} /index.html\n\t\tfile_server\n\t}\n}\n" > /etc/caddy/Caddyfile
+EXPOSE 3000

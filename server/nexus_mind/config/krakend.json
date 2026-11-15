@@ -1,0 +1,127 @@
+{
+  "version": 3,
+  "name": "Nexus-Sovereign-Gateway",
+  "port": 8443,
+  
+  "tls": {
+    "min_version": "1.3",
+    "ciphers": ["TLS_AES_256_GCM_SHA384"],
+    "curve_preferences": ["CurveP384"]
+  },
+  
+  "endpoints": [
+    {
+      "endpoint": "/v1/intelligence",
+      "method": "POST",
+      "output_encoding": "no-op",
+      "backend": [
+        {
+          "host": ["https://sovereign-core.internal"],
+          "url_pattern": "/internal/inference",
+          "disable_host_sanitize": true,
+          "extra_config": {
+            "modifier/martian": {
+              "header.Modifier": {
+                "scope": ["request"],
+                "name": "X-Internal-Auth",
+                "value": "Bearer {{ env \"INTERNAL_API_KEY\" }}"
+              }
+            }
+          }
+        }
+      ],
+      
+      "extra_config": {
+        "security/bot-detector": {
+          "deny": ["^python-requests", "^curl", "^go-http-client"]
+        },
+        "security/cors": {
+          "allow_origins": ["https://apps.nexus-eco.local"],
+          "allow_methods": ["POST", "GET"],
+          "expose_headers": ["X-Request-ID"]
+        },
+        "validation/jwt": {
+          "alg": "RS256",
+          "jwk_url": "https://iam.nexus-core.local/.well-known/jwks.json",
+          "issuer": "https://iam.nexus-core.local",
+          "audience": ["nexus-governance"]
+        },
+        "qos/ratelimit": {
+          "max_rate": 1000,
+          "capacity": 100,
+          "strategy": "ip"
+        }
+      }
+    },
+    {
+      "endpoint": "/v1/feedback",
+      "method": "POST",
+      "output_encoding": "no-op",
+      "backend": [
+        {
+          "host": ["https://sovereign-core.internal"],
+          "url_pattern": "/internal/feedback"
+        }
+      ],
+      "extra_config": {
+        "validation/jwt": {
+          "alg": "RS256",
+          "jwk_url": "https://iam.nexus-core.local/.well-known/jwks.json"
+        }
+      }
+    },
+    {
+      "endpoint": "/v1/verify",
+      "method": "POST",
+      "output_encoding": "no-op",
+      "backend": [
+        {
+          "host": ["https://shadow-corps.internal"],
+          "url_pattern": "/internal/verify"
+        }
+      ],
+      "extra_config": {
+        "validation/jwt": {
+          "alg": "RS256",
+          "jwk_url": "https://iam.nexus-core.local/.well-known/jwks.json"
+        }
+      }
+    },
+    {
+      "endpoint": "/v1/health",
+      "method": "GET",
+      "output_encoding": "no-op",
+      "backend": [
+        {
+          "host": ["https://sovereign-core.internal"],
+          "url_pattern": "/health"
+        }
+      ]
+    },
+    {
+      "endpoint": "/v1/stats",
+      "method": "GET",
+      "output_encoding": "no-op",
+      "backend": [
+        {
+          "host": ["https://sovereign-core.internal"],
+          "url_pattern": "/stats"
+        }
+      ]
+    }
+  ],
+  
+  "extra_config": {
+    "telemetry/logging": {
+      "level": "INFO",
+      "prefix": "[KRAKEND]",
+      "syslog": false,
+      "stdout": true
+    },
+    "telemetry/metrics": {
+      "collection_time": "30s",
+      "listen_address": "0.0.0.0:9090",
+      "exporters": ["prometheus"]
+    }
+  }
+}

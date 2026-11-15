@@ -1,0 +1,36 @@
+# Nexus Mind Core AI
+# Requirements for the cognitive AI platform
+
+# Core
+torch>=2.0.0
+numpy>=1.24.0
+
+# Advanced Neural Network Features (Optional)
+# Install these for state-of-the-art performance:
+
+# For SNN (Spiking Neural Networks):
+# pip install snntorch
+snntorch>=0.8.0
+
+# For Mamba (State Space Models):
+# Requires Linux + NVIDIA GPU + CUDA
+# pip install causal-conv1d>=1.4.0
+# pip install mamba-ssm
+# mamba-ssm>=1.2.0
+
+# API & Server
+aiohttp>=3.8.0
+grpcio>=1.50.0
+grpcio-tools>=1.50.0
+
+# Production
+psutil>=5.9.0
+
+# Testing
+pytest>=7.0.0
+pytest-cov>=4.0.0
+
+# Development
+black>=23.0.0
+flake8>=6.0.0
+mypy>=1.0.0

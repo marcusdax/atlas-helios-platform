@@ -1,0 +1,147 @@
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..700;1,9..144,300..700&family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* AUCTUM — The Archival Ledger / Museum Folio Shell (mirrored from auctum.coffee) */
+    --parchment: #F1F2EA;
+    --parchment-deep: #D5DAC6;
+    --ink: #17231D;
+    --navy: #1F2E33;
+    --oxblood: #8C2F22;
+    --sage: #526055;
+    --slate: #536056;
+    --gold: #6D592D;
+
+    /* 4-Tier Market & Persona Ladder */
+    --c-farmer: #315C26;
+    --c-vanguard: #315C26;
+    --c-roaster: #1A6666;
+    --c-helios: #1A6666;
+    --c-shop: #1A3A6B;
+    --c-atlas: #1A3A6B;
+    --c-consumer: #5B3A8B;
+    --c-prospect: #5B3A8B;
+    --c-patron: #7A5C14;
+    --c-trust: #0F2244;
+
+    /* Trust Verification Status */
+    --status-verified: #27693B;
+    --status-review: #7E5415;
+    --status-flagged: #8C2F22;
+
+    /* Hairlines & Geometry */
+    --hairline: rgb(23 35 29 / 0.14);
+    --hairline-dark: rgb(241 242 234 / 0.14);
+    --radius: 2px;
+  }
+
+  html {
+    scroll-behavior: smooth;
+    overflow-x: clip;
+  }
+
+  body {
+    background-color: var(--parchment);
+    color: var(--ink);
+    font-family: "Archivo", system-ui, sans-serif;
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: clip;
+  }
+
+  ::selection {
+    background: var(--oxblood);
+    color: var(--parchment);
+  }
+}
+
+@layer components {
+  .kicker {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    color: var(--oxblood);
+  }
+
+  .rule {
+    height: 1px;
+    background: var(--hairline);
+    border: none;
+  }
+
+  .caption {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 10px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--slate);
+  }
+
+  .statement {
+    font-family: "Fraunces", Georgia, serif;
+    font-weight: 520;
+    letter-spacing: -0.015em;
+    line-height: 1.05;
+  }
+
+  .deck {
+    font-family: "Fraunces", Georgia, serif;
+    font-style: italic;
+    font-weight: 400;
+    color: var(--slate);
+  }
+
+  .ghost-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    border: 1px solid var(--oxblood);
+    color: var(--oxblood);
+    background: transparent;
+    padding: 0.65rem 1.15rem;
+    border-radius: 2px;
+    transition: all 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .ghost-btn:hover {
+    background: rgb(140 47 34 / 0.08);
+  }
+}
+
+/* Custom scrollbar (Archival Parchment + Ink) */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--parchment-deep);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--slate);
+  border-radius: 2px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--ink);
+}
+
+/* Focus styles */
+*:focus-visible {
+  outline: 2px solid var(--oxblood);
+  outline-offset: 2px;
+}
